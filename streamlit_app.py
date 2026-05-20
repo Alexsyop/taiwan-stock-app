@@ -651,6 +651,10 @@ def build_wiwynn(r):
     vbg=VBG[rt]; vbc=VBC[rt]; vtc=VTC[rt]
     bclr="#27ae60" if sc>=65 else ("#f39c12" if sc>=45 else "#e74c3c")
     cc=_cc(chg)
+    # 預計算 Python 3.11 相容的條件值（避免 f-string 嵌套引號問題）
+    d200_cls = "dn" if (d200 or 0) > 80 else ""
+    d200_str = f"{d200:+.2f}%" if d200 else "N/A"
+    d5_cls   = "up" if d5 <= 3 else "dn"
 
     # 標籤
     tags=""
@@ -846,7 +850,7 @@ padding:10px 13px;margin-bottom:9px;font-size:12px;color:#7d4e00">
     <div><p style="font-size:34px;font-weight:700;color:{bclr};line-height:1">{sc}</p>
       <p style="font-size:11px;color:{bclr}">{"🟢低度" if sc>=65 else "🟡中度" if sc>=45 else "🔴高度"}風險</p></div>
     <div style="flex:1;min-width:160px">
-      <div class="row"><span class="rl">5日線乖離</span><span class="rv {'up' if d5<=3 else 'dn'}"><strong>{d5:+.2f}%</strong></span></div>
+      <div class="row"><span class="rl">5日線乖離</span><span class="rv {d5_cls}"><strong>{d5:+.2f}%</strong></span></div>
       <div class="row"><span class="rl">月線乖離</span><span class="rv">{f"{dev_pct(p,ma20):+.2f}%" if ma20 else "N/A"}</span></div>
       <div class="row"><span class="rl">52W高/低</span><span class="rv">{_fv(r.get('h52'),'',0)}/{_fv(r.get('l52'),'',0)}</span></div>
       <div class="row"><span class="rl">成交量</span><span class="rv">{r.get('vol',0):,}張</span></div>
@@ -862,7 +866,7 @@ padding:10px 13px;margin-bottom:9px;font-size:12px;color:#7d4e00">
     <div class="rf"><p>MA20</p><p>{_fv(ma20,'元',0)}</p></div>
     <div class="rf"><p>MA60</p><p>{_fv(r.get('ma60'),'元',0)}</p></div>
     <div class="rf"><p>MA200</p><p>{_fv(r.get('ma200'),'元',0)}</p></div>
-    <div class="rf"><p>年線乖離</p><p class="{'dn' if (d200 or 0)>80 else ''}">{f"{d200:+.2f}%" if d200 else "N/A"}</p></div>
+    <div class="rf"><p>年線乖離</p><p class="{d200_cls}">{d200_str}</p></div>
   </div>
 </div>
 <div class="card">
