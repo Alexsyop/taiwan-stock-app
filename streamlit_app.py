@@ -1388,25 +1388,30 @@ if st.button("🗑 清除所有快取",use_container_width=True):
     st.session_state.results=[]; st.session_state.gemini_delisting=set()
     st.session_state.cal_events=[]; st.success("✅ 已清除")
 def main():
-try:
-t1,t2,t3,t4,t5=st.tabs(["📡 籌碼掃描","🔍 個股分析","📅 財經行事曆","🏆 排行榜","⚙️ 設定"])
-with t1:
-try: tab_scanner()
-except Exception as e: st.error(f"錯誤：{e}"); st.exception(e)
-with t2:
-try: tab_analysis()
-except Exception as e: st.error(f"錯誤：{e}"); st.exception(e)
-with t3:
-try: tab_calendar()
-except Exception as e: st.error(f"錯誤：{e}"); st.exception(e)
-with t4:
-try: tab_rank()
-except Exception as e: st.error(f"錯誤：{e}"); st.exception(e)
-with t5:
-try: tab_settings()
-except Exception as e: st.error(f"錯誤：{e}"); st.exception(e)
-except Exception as e:
-st.error(f"App 啟動錯誤：{type(e).name}: {e}")
-st.exception(e)
+    try:
+        t1, t2, t3, t4, t5 = st.tabs(["📡 籌碼掃描", "🔍 個股分析", "📅 財經行事曆", "🏆 排行榜", "⚙️ 設定"])
+        
+        with t1:
+            try: tab_scanner()
+            except Exception as e: st.error(f"錯誤：{e}"); st.exception(e)
+        with t2:
+            try: tab_analysis()
+            except Exception as e: st.error(f"錯誤：{e}"); st.exception(e)
+        with t3:
+            try: tab_calendar()
+            except Exception as e: st.error(f"錯誤：{e}"); st.exception(e)
+        with t4:
+            try: tab_rank()
+            except Exception as e: st.error(f"錯誤：{e}"); st.exception(e)
+        with t5:
+            try: tab_settings()
+            except Exception as e: st.error(f"錯誤：{e}"); st.exception(e)
+            
+    except Exception as e:
+        # 修正為 __name__
+        st.error(f"App 啟動錯誤：{type(e).__name__}: {e}")
+        st.exception(e)
 
-if name=="main": main()
+# 修正為 __name__ == "__main__"
+if __name__ == "__main__":
+    main()
