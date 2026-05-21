@@ -990,7 +990,22 @@ def build_wiwynn(r):
             rng_bar=f'<div style="margin-top:9px"><p style="font-size:10px;font-weight:600;color:#8fa3b8;margin-bottom:5px">分析師目標區間</p><div style="position:relative;background:#1a2332;border-radius:5px;height:11px;margin-bottom:3px"><div style="position:absolute;left:{mp3:.0f}%;top:-3px;width:3px;height:17px;background:#5dade2;border-radius:2px;z-index:2"></div><div style="position:absolute;left:{cp3:.0f}%;top:-3px;width:3px;height:17px;background:#fff;border-radius:2px;z-index:3"></div></div><div style="display:flex;justify-content:space-between;font-size:10px;color:#8fa3b8"><span>低 {tp_l:,.0f}</span><span style="color:#5dade2;font-weight:600">均 {tp:,.0f}</span><span>高 {tp_h:,.0f}</span></div></div>'
         exc_cls="dn" if exceed else "up"
         upbox=f'<div class="bd" style="margin-top:7px">✗ 現價超越目標{abs(up2):.1f}%</div>' if exceed else f'<div class="bo" style="margin-top:7px">✅ 距目標+{up2:.1f}%，具合理風險報酬比</div>'
-        tp_card=f'<div class="card"><p class="ct">💰 目標價分析{cb}</p><div class="row"><span class="rl">來源</span><span class="rv" style="font-size:11px;color:#8fa3b8">{ts_}</span></div><div class="row"><span class="rl">分析師均值</span><span class="rv {exc_cls}" style="font-size:15px;font-weight:700">{tp:,.0f} 元</span></div>{"<div class=\\'row\\'><span class=\\'rl\\'>最高目標</span><span class=\\'rv\\'>"+f"{tp_h:,.0f}元</span></div>" if tp_h else ""}{"<div class=\\'row\\'><span class=\\'rl\\'>最低目標</span><span class=\\'rv\\'>"+f"{tp_l:,.0f}元</span></div>" if tp_l else ""}<div class="row"><span class="rl">vs 現價</span><span class="rv {exc_cls}"><strong>{up2:+.1f}%</strong></span></div>{rng_bar}<div class="tp-wrap"><div class="tp-fill" style="width:{bw:.1f}%;background:{fill_c}"></div></div><div class="tp-lbl"><span>0</span><span>現價{p:,.0f}</span><span>{tp:,.0f}</span></div>{upbox}</div>'
+        # Fix: 預計算條件 HTML（避免 Python<3.12 f-string 反斜線錯誤）
+        _tp_hi = (f'<div class="row"><span class="rl">最高目標</span><span class="rv">{tp_h:,.0f}元</span></div>') if tp_h else ""
+        _tp_lo = (f'<div class="row"><span class="rl">最低目標</span><span class="rv">{tp_l:,.0f}元</span></div>') if tp_l else ""
+        tp_card=(
+            f'<div class="card"><p class="ct">💰 目標價分析{cb}</p>'
+            f'<div class="row"><span class="rl">來源</span><span class="rv" style="font-size:11px;color:#8fa3b8">{ts_}</span></div>'
+            f'<div class="row"><span class="rl">分析師均值</span>'
+            f'<span class="rv {exc_cls}" style="font-size:15px;font-weight:700">{tp:,.0f} 元</span></div>'
+            + _tp_hi + _tp_lo +
+            f'<div class="row"><span class="rl">vs 現價</span>'
+            f'<span class="rv {exc_cls}"><strong>{up2:+.1f}%</strong></span></div>'
+            f'{rng_bar}'
+            f'<div class="tp-wrap"><div class="tp-fill" style="width:{bw:.1f}%;background:{fill_c}"></div></div>'
+            f'<div class="tp-lbl"><span>0</span><span>現價{p:,.0f}</span><span>{tp:,.0f}</span></div>'
+            f'{upbox}</div>'
+        )
     mc=ccc(rm or 0); yc=ccc(ry or 0)
     m_c=f"<div class='rf'><p>月營收MoM</p><p class='{mc}'>{(rm or 0):+.1f}%</p></div>" if rm is not None else ""
     y_c=f"<div class='rf'><p>月營收YoY</p><p class='{yc}'>{(ry or 0):+.1f}%</p></div>" if ry is not None else ""
