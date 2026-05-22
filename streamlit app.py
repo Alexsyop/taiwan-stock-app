@@ -1438,9 +1438,15 @@ def tab_settings():
         st.session_state.stock_list=sl.strip(); st.success("✅ 儲存完成！")
     c1,c2=st.columns(2)
     with c1:
-        st.success(f"FinMind：{st.session_state.token[:8]}...") if st.session_state.token else st.warning("未設定 FinMind Token")
+        if st.session_state.token:
+            st.success(f"FinMind：{st.session_state.token[:8]}...")
+        else:
+            st.warning("未設定 FinMind Token")
     with c2:
-        st.success(f"Gemini：{st.session_state.gemini_key[:8]}...") if st.session_state.gemini_key else st.info("Gemini 未設定（可選）")
+        if st.session_state.gemini_key:
+            st.success(f"Gemini：{st.session_state.gemini_key[:8]}...")
+        else:
+            st.info("Gemini 未設定（可選）")
     st.markdown("---")
     st.markdown("""
 **📌 取得 FinMind Token（免費）**：[finmindtrade.com](https://finmindtrade.com)
