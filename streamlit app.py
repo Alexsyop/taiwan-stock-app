@@ -1478,7 +1478,7 @@ def tab_scanner():
         with tab_heat:
             if s_data["stocks"]:
                 heat_html=build_treemap_html(s_data["stocks"],f"{sec_name} 熱力圖")
-                components.html(heat_html,height=560,scrolling=False)
+                st.iframe(src=f"data:text/html;charset=utf-8,{requests.utils.quote(html)}", height=2700)
             else: st.info("此產業今日無數據")
 
 def tab_analysis():
@@ -1589,7 +1589,7 @@ def tab_analysis():
                 if idx is not None: st.session_state.results[idx]=new_r
                 save_results_cache(st.session_state.results); st.success("✅ 已更新"); st.rerun()
             else: st.error(f"❌ {err}")
-    components.html(html,height=2700,scrolling=True)
+    st.iframe(src=f"data:text/html;charset=utf-8,{requests.utils.quote(html)}", height=2700)
 
 def tab_calendar():
     st.markdown("### 📅 財經行事曆")
@@ -1639,7 +1639,7 @@ def tab_calendar():
     co3.metric("🔴 利空",bear_cnt); co4.metric("⚪ 中性",len(events)-bull_cnt-bear_cnt)
     try:
         cal_html=build_calendar_html(events,st.session_state.cal_year,st.session_state.cal_month)
-        components.html(cal_html,height=1250,scrolling=True)
+        st.iframe(src=f"data:text/html;charset=utf-8,{requests.utils.quote(html)}", height=2700)
     except Exception as e:
         st.error(f"月曆渲染失敗：{e}")
         pfx=f"{st.session_state.cal_year}-{st.session_state.cal_month:02d}"
