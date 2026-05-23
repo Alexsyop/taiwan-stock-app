@@ -62,64 +62,6 @@ ALL_STOCKS = {
 _MARKET_NAMES: dict = {}
 
 FINMIND_API = "https://api.finmindtrade.com/api/v4/data"
-
-# ── 手動產業分類字典（可自行在此補充更多代號） ────────────────────
-MANUAL_SECTOR_MAP = {
-    "2330": "半導體",
-    "2303": "半導體",
-    "5347": "半導體",
-    "6770": "半導體",
-    "3105": "半導體",
-    "2454": "IC設計",
-    "3034": "IC設計",
-    "3035": "IC設計",
-    "3443": "IC設計",
-    "3529": "IC設計",
-    "3661": "IC設計",
-    "5274": "IC設計",
-    "4966": "IC設計",
-    "6669": "AI伺服器",
-    "2382": "AI伺服器",
-    "2356": "AI伺服器",
-    "3231": "AI伺服器",
-    "4938": "AI伺服器",
-    "2357": "AI伺服器",
-    "3037": "ABF載板",
-    "2368": "ABF載板",
-    "8046": "ABF載板",
-    "4958": "ABF載板",
-    "3044": "PCB",
-    "2313": "PCB",
-    "3017": "散熱",
-    "2059": "散熱",
-    "1513": "散熱",
-    "3711": "封測",
-    "2449": "封測",
-    "6239": "封測",
-    "2441": "封測",
-    "2408": "記憶體",
-    "2344": "記憶體",
-    "6285": "網通",
-    "3706": "網通",
-    "2308": "電源",
-    "6208": "電源",
-    "2880": "金融",
-    "2881": "金融",
-    "2882": "金融",
-    "2884": "金融",
-    "2885": "金融",
-    "2886": "金融",
-    "2891": "金融",
-    "2892": "金融",
-    "5880": "金融",
-    "2603": "航運",
-    "2609": "航運",
-    "2615": "航運",
-    "6591": "綠能",
-    "3576": "綠能",
-    # 之後可自行在此補充其他代號
-}
-
 GEMINI_MODEL = "gemini-2.0-flash"
 HDR = {"User-Agent":"Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"}
 CACHE_DIR = "/tmp/tw_stock_v63"
@@ -648,15 +590,6 @@ body{background:#1a2332;color:#e8eaf0;font-family:'Helvetica Neue',Arial,sans-se
 # ── 風控 API ─────────────────────────────────────────────────
 
 # ── 官方產業分類快取 ──────────────────────────────────────────
-
-@st.cache_data(ttl=86400)
-def fetch_official_industry_map(token: str = "") -> dict:
-    """
-    回傳手動維護的產業分類字典 MANUAL_SECTOR_MAP。
-    token 參數保留以維持介面相容性，目前不使用。
-    """
-    return MANUAL_SECTOR_MAP
-
 @st.cache_data(ttl=86400)
 def fetch_official_sectors(token: str = "") -> dict:
     mapping = {}
@@ -773,51 +706,6 @@ def fetch_twse_prices_all():
                     out[sid]={"price":p,"volume":v,"chg_pct":cp,"name":str(item.get("Name","")).strip()}
     except Exception: pass
     return out
-
-@st.cache_data(ttl=3600)
-def fetch_inst_data(token: str = "") -> dict:
-    """
-    FinMind 三大法人彙整（主要來源）。
-    回傳格式：{ 股號: {"f": 外資淨買(張), "t": 投信淨買(張), "d": 自營淨買(張)} }
-    ttl=3600（盤後每小時更新）。
-    """
-    if not token:
-        return {}
-    try:
-        today = datetime.now().strftime("%Y-%m-%d")
-        r = requests.get(
-            FINMIND_API,
-            params={
-                "dataset": "TaiwanStockInstitutionalInvestorsBuySell",
-                "token":   token,
-                "date":    today,
-            },
-            headers=HDR, timeout=30, verify=False)
-        if r.status_code == 200:
-            data = r.json().get("data", [])
-            result: dict = {}
-            for item in data:
-                code = str(item.get("stock_id", "")).strip()
-                name = str(item.get("name", ""))
-                # buy/sell 單位為股，除以 1000 轉為張
-                net  = (item.get("buy", 0) - item.get("sell", 0)) // 1000
-                if not code:
-                    continue
-                if code not in result:
-                    result[code] = {"f": 0, "t": 0, "d": 0}
-                if "外資" in name:
-                    result[code]["f"] += net
-                elif "投信" in name:
-                    result[code]["t"] += net
-                elif "自營" in name:
-                    result[code]["d"] += net
-            print(f"【DEBUG】fetch_inst_data 成功：{len(result)} 支")
-            return result
-        else:
-            print(f"【DEBUG】fetch_inst_data 狀態碼: {r.status_code}")
-    except Exception as e:
-        print(f"【ERROR】fetch_inst_data 失敗: {e}")
-    return {}
 
 @st.cache_data(ttl=14400)
 def fetch_twse_institution_all(qdate=""):
@@ -1303,50 +1191,39 @@ def build_full_html(results):
             f'{nav}</div>{cards}</div></body></html>')
 
 # ── 籌碼掃描：産業分析 ────────────────────────────────────────
-def compute_sector_stats(prices, insts, hard_risk, sector_mapping):
+def compute_sector_stats(prices: dict, insts: dict,
+                          hard_risk: set, sector_mapping: dict) -> list:
     """
-    依 sector_mapping 動態分群，回傳各產業統計列表。
-    - 代號清洗：去除 .TW / .TWO 後綴與空格，統一為 4 碼數字格式。
-    - 查無分類的股票歸入「其他」。
-    - price / vol 為 None 或 <= 0 者直接跳過，確保前端資料乾淨。
+    依官方產業分類動態分群，統計各產業漲跌、成交量、法人買賣。
+    sector_mapping：{ "股號": "官方產業名稱" }（from fetch_official_sectors()）
+    查無分類的股票一律歸入「其他」，確保全市場覆蓋。
     """
-    from collections import defaultdict
+    from collections import defaultdict as _dd
 
-    def normalize_code(c):
-        """2330.TW → 2330 ／ 2330.TWO → 2330 ／ 2330 → 2330"""
-        return str(c).strip().split(".")[0]
+    total_vol = sum(p.get("volume", 0) or 0 for p in prices.values()) or 1
+    bucket: dict = _dd(list)
 
-    total_vol     = sum((p.get("volume") or 0) for p in prices.values()) or 1
-    sector_groups: dict = defaultdict(list)
-
+    # ── 動態分群：遍歷所有有報價的股票 ───────────────────────
     for code, p in prices.items():
-        # ── 防呆過濾 ──────────────────────────────────────────
         if code in hard_risk:
             continue
-        if p is None:
+        if not p or p.get("price", 0) <= 0:
             continue
-        price = p.get("price") or 0
-        vol   = p.get("volume") or 0
-        if price <= 0 or vol <= 0:      # 過濾無效報價，防止 JS 渲染崩潰
-            continue
-        # ── 代號清洗後對照產業分類 ───────────────────────────
-        norm_code = normalize_code(code)
-        sec_name  = sector_mapping.get(norm_code, "其他")
-        inst      = insts.get(code, {})
-        chg       = p.get("chg_pct") or 0
-        sector_groups[sec_name].append({
+        sector = sector_mapping.get(code, "") or "其他"
+        inst = insts.get(code, {})
+        bucket[sector].append({
             "code":  code,
             "name":  nm(code),
-            "price": price,
-            "chg":   chg,
-            "vol":   vol,
-            "f":     inst.get("f") or 0,
-            "t":     inst.get("t") or 0,
+            "price": p["price"],
+            "chg":   p.get("chg_pct", 0) or 0,
+            "vol":   p.get("volume",  0) or 0,
+            "f":     inst.get("f", 0) or 0,
+            "t":     inst.get("t", 0) or 0,
         })
 
     # ── 彙整統計 ─────────────────────────────────────────────
     stats = []
-    for sec_name, stocks in sector_groups.items():
+    for sec_name, stocks in bucket.items():
         if not stocks:
             continue
         total_v  = sum(s["vol"] for s in stocks)
@@ -1356,7 +1233,7 @@ def compute_sector_stats(prices, insts, hard_risk, sector_mapping):
         dn  = sum(1 for s in stocks if s["chg"] < 0)
         stats.append({
             "name":      sec_name,
-            "desc":      f"共 {len(stocks)} 檔",
+            "desc":      f"{len(stocks)} 支成份股",
             "count":     len(stocks),
             "avg_chg":   avg_chg,
             "total_vol": total_v,
@@ -1366,227 +1243,103 @@ def compute_sector_stats(prices, insts, hard_risk, sector_mapping):
             "dn":        dn,
             "stocks":    sorted(stocks, key=lambda x: x["chg"], reverse=True),
         })
-        # ── 代號清洗後對照產業分類 ───────────────────────────
-        norm_code = normalize_code(code)
-        sec_name  = sector_mapping.get(norm_code, "其他")
-        
-        # --- 新增這行進行除錯 ---
-        if norm_code == "2330":
-            print(f"【DEBUG】正在處理 2330, 對應的產業名稱為: {sec_name}")
-        # ----------------------
+
     return stats
 
 def build_treemap_html(stocks, title):
-    """
-    專業熱力圖：Squarify 演算法 + Top20/其他合併 + 成交值/量切換。
-    台股慣例：🔴漲 🟢跌。
-    """
-    if not stocks:
-        return "<body style='background:#1a2332;color:#e8eaf0;padding:20px'>無數據</body>"
-
-    js_data = json.dumps([{
-        "name":  s.get("name", s.get("code", "")),
-        "code":  s.get("code", ""),
-        "price": s.get("price", 0),
-        "chg":   round(s.get("chg", 0), 2),
-        "vol":   max(s.get("vol", 1), 1),
-    } for s in stocks], ensure_ascii=False)
-
-    title_esc = title.replace('"', '&quot;')
-
-    CSS = (
-        "*{box-sizing:border-box;margin:0;padding:0}"
-        "body{background:#1a2332;font-family:'Helvetica Neue',Arial,sans-serif}"
-        "#hdr{display:flex;align-items:center;gap:8px;padding:8px 12px;flex-wrap:wrap;border-bottom:1px solid #2c3e50}"
-        "#ti{color:#e8eaf0;font-size:13px;font-weight:700;flex-shrink:0}"
-        ".tb{background:#2c3e50;border:1px solid #3d5166;color:#8fa3b8;"
-        "    padding:3px 13px;border-radius:99px;cursor:pointer;font-size:12px;transition:all .15s}"
-        ".tb.on{background:#27ae60;border-color:#27ae60;color:#fff;font-weight:600}"
-        "#hint{font-size:11px;color:#8fa3b8;margin-left:auto}"
-        "#tm{position:relative;width:100%;height:450px;overflow:hidden;background:#1a2332}"
-        ".c{position:absolute;display:flex;flex-direction:column;align-items:center;"
-        "   justify-content:center;border:1px solid #1a2332;border-radius:3px;"
-        "   overflow:hidden;cursor:default;transition:opacity .12s}"
-        ".c:hover{opacity:.82;z-index:10}"
-        ".c .cn{font-size:12px;font-weight:700;color:#fff;text-shadow:1px 1px 2px rgba(0,0,0,.9);"
-        "       white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:94%}"
-        ".c .cp{font-size:11px;color:#fff;text-shadow:1px 1px 2px rgba(0,0,0,.9)}"
-        ".c .cx{font-size:10px;color:rgba(255,255,255,.72)}"
-        ".lg{display:flex;flex-direction:column;align-items:center;padding:5px 0}"
-        ".lb{width:280px;height:10px;border-radius:6px;"
-        "    background:linear-gradient(90deg,#145a32,#27ae60,#2d3436,#e74c3c,#8b0000)}"
-        ".ll{display:flex;justify-content:space-between;width:280px;font-size:10px;color:#8fa3b8;margin-top:2px}"
-    )
-
-    # JS 單獨用字串（非 f-string）避免大括號衝突
-    JS = (
-        "const RAW=" + js_data + ";\n"
-        "let MODE='amt';\n"
-        "\n"
-        "// 計算成交額 amt = price * vol\n"
-        "const DATA = RAW.map(d => Object.assign({}, d, {amt: Math.round(d.price * d.vol)}));\n"
-        "\n"
-        "function getColor(c) {\n"
-        "  if (c>=9)  return '#8b0000';\n"
-        "  if (c>=6)  return '#c0392b';\n"
-        "  if (c>=3)  return '#e74c3c';\n"
-        "  if (c>=1)  return '#ff6b6b';\n"
-        "  if (c>0)   return '#ff9999';\n"
-        "  if (c===0) return '#2d3436';\n"
-        "  if (c>-1)  return '#aaffaa';\n"
-        "  if (c>-3)  return '#55efc4';\n"
-        "  if (c>-6)  return '#27ae60';\n"
-        "  if (c>-9)  return '#1e8449';\n"
-        "  return '#145a32';\n"
-        "}\n"
-        "\n"
-        "// ── Top20 + 其他合併 ─────────────────────────────────\n"
-        "function getTop20(items, wk) {\n"
-        "  const sorted = [...items].sort((a,b) => b[wk] - a[wk]);\n"
-        "  const top  = sorted.slice(0, 20);\n"
-        "  const rest = sorted.slice(20);\n"
-        "  if (rest.length > 0) {\n"
-        "    const totalW = rest.reduce((s,d) => s + d[wk], 0) || 1;\n"
-        "    const avgChg = rest.reduce((s,d) => s + d.chg * d[wk], 0) / totalW;\n"
-        "    top.push({\n"
-        "      name:'其他', code:'OTHER', price:0, chg:avgChg,\n"
-        "      vol: rest.reduce((s,d) => s+d.vol, 0),\n"
-        "      amt: rest.reduce((s,d) => s+d.amt, 0),\n"
-        "      isOther: true\n"
-        "    });\n"
-        "  }\n"
-        "  return top;\n"
-        "}\n"
-        "\n"
-        "// ── Squarify 演算法（防麵條方塊） ───────────────────\n"
-        "function worstAR(row, rowSum, shortSide) {\n"
-        "  const rowLen = rowSum / shortSide;\n"
-        "  let worst = 0;\n"
-        "  for (const d of row) {\n"
-        "    const itemSide = rowSum > 0 ? (d.sw / rowSum) * shortSide : 0;\n"
-        "    if (itemSide <= 0) continue;\n"
-        "    const ar = Math.max(rowLen / itemSide, itemSide / rowLen);\n"
-        "    if (ar > worst) worst = ar;\n"
-        "  }\n"
-        "  return worst;\n"
-        "}\n"
-        "\n"
-        "function squarify(items, x, y, w, h) {\n"
-        "  const nodes = [];\n"
-        "  if (!items.length || w < 1 || h < 1) return nodes;\n"
-        "  let rem = [...items], rx=x, ry=y, rw=w, rh=h;\n"
-        "\n"
-        "  while (rem.length > 0 && rw > 0.5 && rh > 0.5) {\n"
-        "    const isVert  = rw >= rh;           // 較寬 → 切左右（垂直方向切割）\n"
-        "    const shortSide = Math.min(rw, rh);\n"
-        "\n"
-        "    // 建立本輪 row\n"
-        "    let row = [rem[0]], rowSum = rem[0].sw;\n"
-        "    for (let i = 1; i < rem.length; i++) {\n"
-        "      const d = rem[i];\n"
-        "      const newSum = rowSum + d.sw;\n"
-        "      const curr   = worstAR(row,           rowSum, shortSide);\n"
-        "      const next   = worstAR([...row, d], newSum, shortSide);\n"
-        "      if (next <= curr) { row.push(d); rowSum = newSum; }\n"
-        "      else break;\n"
-        "    }\n"
-        "\n"
-        "    // 佈局本輪 row\n"
-        "    const rowLen = rowSum / shortSide;\n"
-        "    let off = isVert ? ry : rx;\n"
-        "    for (const d of row) {\n"
-        "      const frac      = d.sw / rowSum;\n"
-        "      const cellShort = frac * shortSide;\n"
-        "      if (isVert)\n"
-        "        nodes.push(Object.assign({}, d, {x:rx,  y:off, w:rowLen,    h:cellShort}));\n"
-        "      else\n"
-        "        nodes.push(Object.assign({}, d, {x:off, y:ry,  w:cellShort, h:rowLen}));\n"
-        "      off += cellShort;\n"
-        "    }\n"
-        "\n"
-        "    // 更新剩餘矩形\n"
-        "    rem = rem.slice(row.length);\n"
-        "    if (isVert) { rx += rowLen; rw -= rowLen; }\n"
-        "    else        { ry += rowLen; rh -= rowLen; }\n"
-        "  }\n"
-        "  return nodes;\n"
-        "}\n"
-        "\n"
-        "// ── 渲染 ─────────────────────────────────────────────\n"
-        "function render() {\n"
-        "  const ct = document.getElementById('tm');\n"
-        "  const W = ct.offsetWidth || 800, H = 450;\n"
-        "  const top    = getTop20(DATA, MODE);\n"
-        "  const totalW = top.reduce((s,d) => s + d[MODE], 0) || 1;\n"
-        "  const scale  = (W * H) / totalW;\n"
-        "  const scaled = top.map(d => Object.assign({}, d, {sw: d[MODE] * scale}));\n"
-        "  const cells  = squarify(scaled, 0, 0, W, H);\n"
-        "  ct.innerHTML = '';\n"
-        "  cells.forEach(function(c) {\n"
-        "    if (c.w < 1 || c.h < 1) return;\n"
-        "    const div = document.createElement('div');\n"
-        "    div.className = 'c';\n"
-        "    const bg = c.isOther ? '#2d3436' : getColor(c.chg);\n"
-        "    div.style.left   = Math.round(c.x + 0.5) + 'px';\n"
-        "    div.style.top    = Math.round(c.y + 0.5) + 'px';\n"
-        "    div.style.width  = Math.max(Math.round(c.w - 1), 1) + 'px';\n"
-        "    div.style.height = Math.max(Math.round(c.h - 1), 1) + 'px';\n"
-        "    div.style.background = bg;\n"
-        "    const sign = c.chg >= 0 ? '+' : '';\n"
-        "    div.title = c.name + ' ' + c.code + '\\n' + c.price + '元  ' + sign + c.chg.toFixed(2) + '%';\n"
-        "    if (c.w > 38 && c.h > 26) {\n"
-        "      let inner = '';\n"
-        "      if (c.w > 56 && c.h > 42) inner += '<div class=\"cn\">' + c.name + '</div>';\n"
-        "      inner += '<div class=\"cp\">' + sign + c.chg.toFixed(1) + '%</div>';\n"
-        "      if (c.h > 58 && c.price) inner += '<div class=\"cx\">' + c.price + '元</div>';\n"
-        "      div.innerHTML = inner;\n"
-        "    }\n"
-        "    ct.appendChild(div);\n"
-        "  });\n"
-        "}\n"
-        "\n"
-        "function sw(m) {\n"
-        "  MODE = m;\n"
-        "  document.getElementById('b-amt').className = 'tb' + (m==='amt' ? ' on' : '');\n"
-        "  document.getElementById('b-vol').className = 'tb' + (m==='vol' ? ' on' : '');\n"
-        "  document.getElementById('hint').textContent =\n"
-        "    m === 'amt' ? '方塊大小=成交值，\\U0001f534漲\\U0001f7e2跌'\n"
-        "                : '方塊大小=成交量，\\U0001f534漲\\U0001f7e2跌';\n"
-        "  render();\n"
-        "}\n"
-        "\n"
-        "render();\n"
-        "window.addEventListener('resize', render);\n"
-    )
-    # 修正 emoji unicode escape
-    JS = JS.replace("\\U0001f534", "🔴").replace("\\U0001f7e2", "🟢")
-
-    return (
-        "<!DOCTYPE html><html lang=\"zh-TW\"><head>"
-        "<meta charset=\"UTF-8\">"
-        "<meta name=\"viewport\" content=\"width=device-width,initial-scale=1\">"
-        "<style>" + CSS + "</style></head><body>"
-        "<div id=\"hdr\">"
-        "  <div id=\"ti\">🌡️ " + title_esc + "</div>"
-        "  <button class=\"tb on\" id=\"b-amt\" onclick=\"sw('amt')\">成交值</button>"
-        "  <button class=\"tb\" id=\"b-vol\" onclick=\"sw('vol')\">成交量</button>"
-        "  <span id=\"hint\">方塊大小=成交值，🔴漲🟢跌</span>"
-        "</div>"
-        "<div id=\"tm\"></div>"
-        "<div class=\"lg\">"
-        "  <div class=\"lb\"></div>"
-        "  <div class=\"ll\"><span>-10%+</span><span>-5%</span><span>平盤</span><span>+5%</span><span>+10%+</span></div>"
-        "</div>"
-        "<script>" + JS + "</script>"
-        "</body></html>"
-    )
-
+    if not stocks: return "<body style='background:#1a2332;color:#e8eaf0;padding:20px'>無數據</body>"
+    def chg_color(c):
+        if c>=9: return "#8b0000"
+        elif c>=6: return "#c0392b"
+        elif c>=3: return "#e74c3c"
+        elif c>=1: return "#ff6b6b"
+        elif c>0: return "#ff9999"
+        elif c==0: return "#2d3436"
+        elif c>-1: return "#aaffaa"
+        elif c>-3: return "#55efc4"
+        elif c>-6: return "#27ae60"
+        elif c>-9: return "#1e8449"
+        else: return "#145a32"
+    js_data=json.dumps([{"name":s.get("name",s.get("code","")),"code":s.get("code",""),
+                          "price":s.get("price",0),"chg":round(s.get("chg",0),2),
+                          "vol":max(s.get("vol",1),1),"color":chg_color(s.get("chg",0))}
+                         for s in stocks],ensure_ascii=False)
+    return f"""<!DOCTYPE html><html><head><meta charset="UTF-8">
+<style>*{{box-sizing:border-box;margin:0;padding:0}}body{{background:#1a2332;font-family:Arial}}
+#ti{{color:#e8eaf0;font-size:13px;font-weight:700;padding:8px 12px}}
+#tm{{position:relative;width:100%;height:450px;overflow:hidden}}
+.c{{position:absolute;display:flex;flex-direction:column;align-items:center;justify-content:center;
+    border:1px solid #1a2332;border-radius:3px;overflow:hidden;cursor:default}}
+.c:hover{{opacity:.85;z-index:10}}
+.c .n{{font-size:12px;font-weight:700;color:#fff;text-shadow:1px 1px 2px rgba(0,0,0,.9);
+       white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:95%}}
+.c .p{{font-size:11px;color:#fff;text-shadow:1px 1px 2px rgba(0,0,0,.9)}}
+.lg{{display:flex;flex-direction:column;align-items:center;padding:6px 0}}
+.lb{{width:280px;height:12px;border-radius:6px;
+     background:linear-gradient(90deg,#145a32,#27ae60,#2d3436,#e74c3c,#8b0000)}}
+.ll{{display:flex;justify-content:space-between;width:280px;font-size:10px;color:#8fa3b8;margin-top:2px}}</style>
+</head><body>
+<div id="ti">🌡️ {title}（方塊大小=成交量，🔴漲🟢跌）</div>
+<div id="tm"></div>
+<div class="lg"><div class="lb"></div><div class="ll"><span>-10%+</span><span>-5%</span><span>平盤</span><span>+5%</span><span>+10%+</span></div></div>
+<script>
+const D={js_data};
+const ct=document.getElementById('tm');
+function layout(items,x,y,w,h){{
+  const total=items.reduce((s,d)=>s+d.vol,0)||1;
+  const cells=[]; let row=[],rv=0,cx=x,cy=y,rw=w,rh=h;
+  function place(row,rv,px,py,pw,ph){{
+    const short=Math.min(pw,ph),side=rv/total*(pw*ph)/short;
+    let ox=px,oy=py;
+    for(const r of row){{
+      const f=r.vol/rv;
+      if(pw<=ph){{cells.push({{...r,x:ox,y:oy,w:side,h:f*short}});oy+=f*short;}}
+      else{{cells.push({{...r,x:ox,y:oy,w:f*side,h:short}});ox+=f*side;}}
+    }}
+    return side;
+  }}
+  for(let i=0;i<items.length;i++){{
+    const d=items[i];
+    if(!row.length){{row.push(d);rv+=d.vol;}}
+    else{{
+      const tv=rv+d.vol,short=Math.min(rw,rh);
+      const side=tv/total*(rw*rh)/short;
+      const testAsp=Math.max(...[...row,d].map(r=>{{const f=r.vol/tv;const rl=f*(rw<=rh?rh:rw)*short/side;return Math.max(side/rl,rl/side);}}));
+      const currAsp=Math.max(...row.map(r=>{{const f=r.vol/rv;const sl=rv/total*(rw*rh)/short;const rl=f*(rw<=rh?rh:rw)*short/sl;return Math.max(sl/rl,rl/sl);}}));
+      if(testAsp<=currAsp){{row.push(d);rv+=d.vol;}}
+      else{{
+        const s=place(row,rv,cx,cy,rw,rh);
+        if(rw<=rh){{cy+=s;rh-=s;}}else{{cx+=s;rw-=s;}}
+        row=[d];rv=d.vol;
+      }}
+    }}
+    if(i===items.length-1&&row.length)place(row,rv,cx,cy,rw,rh);
+  }}
+  return cells;
+}}
+function render(){{
+  const W=ct.offsetWidth||800,H=450;
+  const sorted=[...D].sort((a,b)=>b.vol-a.vol);
+  const cells=layout(sorted,0,0,W,H);
+  ct.innerHTML='';
+  cells.forEach(c=>{{
+    const div=document.createElement('div');
+    div.className='c';
+    div.style.cssText=`left:${{Math.round(c.x+1)}}px;top:${{Math.round(c.y+1)}}px;width:${{Math.max(Math.round(c.w-2),2)}}px;height:${{Math.max(Math.round(c.h-2),2)}}px;background:${{c.color}}`;
+    div.title=c.name+' '+c.code+'\\n'+c.price+'元 '+(c.chg>=0?'+':'')+c.chg+'%';
+    const sign=c.chg>=0?'+':'';
+    if(c.w>50&&c.h>35)div.innerHTML=(c.w>70&&c.h>50?`<div class="n">${{c.name}}</div>`:'')+`<div class="p">${{sign}}${{c.chg.toFixed(1)}}%</div>`;
+    ct.appendChild(div);
+  }});
+}}
+render();window.addEventListener('resize',render);
+</script></body></html>"""
 
 def tab_scanner():
     st.markdown("### 📡 籌碼掃描 — 產業透視")
     c_r,c_b=st.columns([3,1])
     with c_r:
-        if st.button("🔄 重新整理全市場數據",width='stretch',key="scn_refresh"):
+        if st.button("🔄 重新整理全市場數據",use_container_width=True,key="scn_refresh"):
             for fn in [fetch_twse_prices_all, fetch_twse_institution_all,
                        fetch_tpex_prices_all,  fetch_tpex_institution_all,
                        fetch_disposed_cached,  fetch_full_delivery_cached,
@@ -1596,7 +1349,7 @@ def tab_scanner():
             st.session_state.scanner_sector=None; st.rerun()
     with c_b:
         if st.session_state.get("scanner_sector"):
-            if st.button("⬅ 返回列表",width='stretch',key="scn_back"):
+            if st.button("⬅ 返回列表",use_container_width=True,key="scn_back"):
                 st.session_state.scanner_sector=None; st.rerun()
     qdate=get_inst_date_str()
     with st.spinner("📡 取得全市場數據 + 官方產業分類..."):
@@ -1613,6 +1366,7 @@ def tab_scanner():
         hard_risk = full_del | delist | st.session_state.gemini_delisting
         # ── 官方產業分類（24 小時快取，幾乎不消耗時間）────────
         token = st.session_state.get("token", "")
+        sector_mapping = fetch_official_sectors(token)
     gkey=st.session_state.gemini_key
     if gkey:
         with st.spinner("🤖 偵測下市風險股..."):
@@ -1623,33 +1377,11 @@ def tab_scanner():
     inst_date=get_institution_query_date_str() if False else (now_tw.date()-timedelta(days=1) if now_tw.hour<17 else now_tw.date())
     time_note="（昨日盤後）" if now_tw.hour<17 else "（今日盤後）"
     inst_note=f"法人：{len(insts)} 檔" if insts else "法人：今日未取得"
-    st.caption(f"股價：{len(prices)} 檔 | {inst_note} | {time_note}")
+    sec_note = f"產業：{len(sector_mapping)} 種官方分類" if sector_mapping else "產業分類：載入中"
+    st.caption(f"股價：{len(prices)} 檔 | {inst_note} | {sec_note} | {time_note}")
     if not prices: st.error("⚠️ 無法取得股價數據"); return
-    # ── Token 取得 ─────────────────────────────────────────
-    _token = st.session_state.get("token", "")
-    if not _token:
-        st.info("💡 設定 FinMind Token 可取得完整法人數據與產業分類（含興櫃）。")
-
-    # ── 法人數據：FinMind 優先，失敗則用 TWSE/TPEx ───────────
-    _fm_insts = fetch_inst_data(_token) if _token else {}
-    if _fm_insts:
-        insts = _fm_insts
-        print(f"【DEBUG】法人數據來源：FinMind（{len(insts)} 支）")
-    else:
-        print(f"【DEBUG】法人數據來源：TWSE/TPEx（{len(insts)} 支）")
-
-    # ── 官方產業分類 ──────────────────────────────────────────
-    sector_mapping = fetch_official_industry_map(_token)
     if not sector_mapping:
-        st.warning("⚠️ 無法取得產業分類，所有股票暫歸『其他』。請確認網路或稍後重試。")
-
-    # ── 健檢機制：顯示分類覆蓋率 ─────────────────────────────
-    total_stocks   = len([c for c in prices if prices[c].get('price', 0) > 0])
-    unclassified   = sum(1 for c in prices if c not in sector_mapping and prices[c].get('price', 0) > 0)
-    cover_pct      = round((1 - unclassified / max(total_stocks, 1)) * 100, 1)
-    st.caption(f"🔍 全市場 {total_stocks} 檔 | 產業分類覆蓋 {cover_pct}%（{total_stocks-unclassified} 檔已分類 / {unclassified} 檔歸入其他）")
-    if total_stocks > 0 and unclassified / total_stocks > 0.5:
-        st.warning("⚠️ 超過 50% 股票未分類！請確認 API 是否失效，或設定 FinMind Token。")
+        st.warning("⚠️ 無法取得產業分類資料，請確認網路或 FinMind Token 設定，稍後再試。")
 
     stats = compute_sector_stats(prices, insts, hard_risk, sector_mapping)
     if not st.session_state.get("scanner_sector"):
@@ -1718,7 +1450,7 @@ def tab_scanner():
         if not s_data: st.warning(f"找不到 {sec_name} 的數據"); return
         c_b2,c_t2=st.columns([1,5])
         with c_b2:
-            if st.button("⬅ 返回",width='stretch',key="scn_back2"):
+            if st.button("⬅ 返回",use_container_width=True,key="scn_back2"):
                 st.session_state.scanner_sector=None; st.rerun()
         with c_t2:
             chg=s_data["avg_chg"]; chg_c="#e74c3c" if chg>0 else "#27ae60"
@@ -1735,7 +1467,7 @@ def tab_scanner():
                   for s in s_data["stocks"]]
             if rows:
                 rows.sort(key=lambda x:x["漲跌%"],reverse=True)
-                st.dataframe(pd.DataFrame(rows),width='stretch',hide_index=True)
+                st.dataframe(pd.DataFrame(rows),use_container_width=True,hide_index=True)
                 avg_chg2=round(sum(r["漲跌%"] for r in rows)/len(rows),2)
                 up_cnt=sum(1 for r in rows if r["漲跌%"]>0)
                 cc1,cc2,cc3=st.columns(3)
@@ -1746,9 +1478,7 @@ def tab_scanner():
         with tab_heat:
             if s_data["stocks"]:
                 heat_html=build_treemap_html(s_data["stocks"],f"{sec_name} 熱力圖")
-                # 移除 scrolling 參數後的正確寫法
-                components.iframe(
-                src=f"data:text/html;charset=utf-8,{requests.utils.quote(heat_html)}",height=560)
+                components.html(heat_html,height=560,scrolling=False)
             else: st.info("此產業今日無數據")
 
 def tab_analysis():
@@ -1765,7 +1495,7 @@ def tab_analysis():
     with c_s1:
         query=st.text_input("搜尋",placeholder="輸入股號（如 2330）或中文名稱（如 台積電）",label_visibility="collapsed",key="ana_search")
     with c_s2:
-        st.button("搜尋",width='stretch',key="ana_search_btn")
+        st.button("搜尋",use_container_width=True,key="ana_search_btn")
     if query:
         res_s=search_stocks(query)
         if res_s:
@@ -1774,7 +1504,7 @@ def tab_analysis():
             sel_code,sel_name=res_s[sel_i]
             ca,cb,cc2=st.columns(3)
             with ca:
-                if st.button(f"📊 立即分析 {sel_name}",width='stretch',disabled=not token,key="ana_now"):
+                if st.button(f"📊 立即分析 {sel_name}",use_container_width=True,disabled=not token,key="ana_now"):
                     disposed=fetch_disposed_cached(); full_del=fetch_full_delivery_cached()
                     delisting=fetch_delisting_cached(); gemini_del=st.session_state.gemini_delisting
                     with st.spinner(f"分析 {sel_name}（{sel_code}）..."):
@@ -1787,7 +1517,7 @@ def tab_analysis():
                         st.success(f"✅ {sel_name} 完成！評等 {r2['rating']}（{r2['score']}分）"); st.rerun()
                     else: st.error(f"❌ 失敗：{err}")
             with cb:
-                if st.button("➕ 加入自選清單",width='stretch',key="ana_add"):
+                if st.button("➕ 加入自選清單",use_container_width=True,key="ana_add"):
                     codes=[s.strip() for s in st.session_state.stock_list.split(",") if s.strip()]
                     if sel_code not in codes:
                         codes.insert(0,sel_code); st.session_state.stock_list=",".join(codes)
@@ -1799,7 +1529,7 @@ def tab_analysis():
     sids=[s.strip() for s in st.session_state.stock_list.split(",") if s.strip()]
     st.markdown(f"**自選清單：{len(sids)} 支** — `{', '.join(sids[:5])}{'...' if len(sids)>5 else ''}`")
     c1,c2=st.columns([3,1])
-    with c1: run=st.button("🔄 分析全部自選股",disabled=not token,width='stretch',key="ana_run")
+    with c1: run=st.button("🔄 分析全部自選股",disabled=not token,use_container_width=True,key="ana_run")
     with c2: force=st.checkbox("強制重爬",value=False,key="ana_force")
     if not results:
         cached=load_results_cache()
@@ -1837,7 +1567,7 @@ def tab_analysis():
         col.metric(f"{em} {rt}",cnts.get(rt,0))
     full_html=build_full_html(results)
     st.download_button("📥 下載完整 HTML 報告",full_html,
-                       f"portfolio_{date.today().strftime('%Y%m%d')}.html","text/html",width='stretch')
+                       f"portfolio_{date.today().strftime('%Y%m%d')}.html","text/html",use_container_width=True)
     st.markdown("---")
     sorted_r=sorted(results,key=lambda x:x["score"],reverse=True)
     opts2=[f"{r['rating']} {r['name']}（{r['sid']}） — {r['score']}分 | {r['price']:,.0f}元 {r['chg']:+.1f}%" for r in sorted_r]
@@ -1847,9 +1577,9 @@ def tab_analysis():
     with ca:
         html=build_wiwynn(r_sel)
         st.download_button(f"📄 下載 {r_sel['name']} 報告",html,
-                           f"{r_sel['sid']}_{date.today().strftime('%Y%m%d')}.html","text/html",width='stretch')
+                           f"{r_sel['sid']}_{date.today().strftime('%Y%m%d')}.html","text/html",use_container_width=True)
     with cb:
-        if st.button(f"🔄 重新分析 {r_sel['name']}",width='stretch',key="ana_rerun"):
+        if st.button(f"🔄 重新分析 {r_sel['name']}",use_container_width=True,key="ana_rerun"):
             disposed=fetch_disposed_cached(); full_del=fetch_full_delivery_cached()
             delisting=fetch_delisting_cached(); gemini_del=st.session_state.gemini_delisting
             with st.spinner("重新抓取..."):
@@ -1859,14 +1589,14 @@ def tab_analysis():
                 if idx is not None: st.session_state.results[idx]=new_r
                 save_results_cache(st.session_state.results); st.success("✅ 已更新"); st.rerun()
             else: st.error(f"❌ {err}")
-    st.iframe(html,height=2700,scrolling=True)
+    components.html(html,height=2700,scrolling=True)
 
 def tab_calendar():
     st.markdown("### 📅 財經行事曆")
     gkey=st.session_state.gemini_key
     c1,c2,c3,c4=st.columns([1,3,3,1])
     with c1:
-        if st.button("◄",width='stretch',key="cal_prev"):
+        if st.button("◄",use_container_width=True,key="cal_prev"):
             if st.session_state.cal_month==1:
                 st.session_state.cal_month=12; st.session_state.cal_year-=1
             else: st.session_state.cal_month-=1
@@ -1879,17 +1609,17 @@ def tab_calendar():
         if gkey: st.success("🤖 Gemini 搜尋已啟用")
         else:    st.warning("設定 Gemini Key 以啟用 AI 搜尋")
     with c4:
-        if st.button("►",width='stretch',key="cal_next"):
+        if st.button("►",use_container_width=True,key="cal_next"):
             if st.session_state.cal_month==12:
                 st.session_state.cal_month=1; st.session_state.cal_year+=1
             else: st.session_state.cal_month+=1
             st.session_state.cal_events=[]; st.session_state.cal_events_ts=None; st.rerun()
     c_r,c_t=st.columns(2)
     with c_r:
-        if st.button("🔄 重新搜尋事件",width='stretch',key="cal_refresh"):
+        if st.button("🔄 重新搜尋事件",use_container_width=True,key="cal_refresh"):
             st.session_state.cal_events=[]; st.session_state.cal_events_ts=None; st.rerun()
     with c_t:
-        if st.button("📅 回到本月",width='stretch',key="cal_today"):
+        if st.button("📅 回到本月",use_container_width=True,key="cal_today"):
             st.session_state.cal_year=date.today().year; st.session_state.cal_month=date.today().month
             st.session_state.cal_events=[]; st.session_state.cal_events_ts=None; st.rerun()
     events=[]
@@ -1909,7 +1639,7 @@ def tab_calendar():
     co3.metric("🔴 利空",bear_cnt); co4.metric("⚪ 中性",len(events)-bull_cnt-bear_cnt)
     try:
         cal_html=build_calendar_html(events,st.session_state.cal_year,st.session_state.cal_month)
-        st.iframe(cal_html,height=1250,scrolling=True)
+        components.html(cal_html,height=1250,scrolling=True)
     except Exception as e:
         st.error(f"月曆渲染失敗：{e}")
         pfx=f"{st.session_state.cal_year}-{st.session_state.cal_month:02d}"
@@ -1927,7 +1657,7 @@ def tab_rank():
                       "目標":f"{r['tp']:,.0f}" if r.get("tp") else "-",
                       "風控":("🚨全額交割" if r.get("is_full_del") else "⚠️下市" if r.get("is_delisting") else "⏱處置" if r.get("is_disposed") else "正常")}
                      for r in results])
-    st.dataframe(df,width='stretch',hide_index=True)
+    st.dataframe(df,use_container_width=True,hide_index=True)
     buy2=[r for r in results if r["fc"]>0 and r["tc"]>0 and not r.get("is_hard_risk",False)]
     if buy2:
         st.markdown("### ✅ 外資+投信同向買超")
@@ -1952,7 +1682,7 @@ def tab_settings():
         gkey=st.text_input("g",value=st.session_state.gemini_key,type="password",placeholder="貼上 Google Gemini API Key（AIza...）",label_visibility="collapsed")
         st.markdown("**📋 自選股清單**（逗號分隔）")
         sl=st.text_area("s",value=st.session_state.stock_list,height=80,label_visibility="collapsed")
-        ok=st.form_submit_button("💾 儲存設定",width='stretch')
+        ok=st.form_submit_button("💾 儲存設定",use_container_width=True)
     if ok:
         st.session_state.token=token.strip(); st.session_state.gemini_key=gkey.strip()
         st.session_state.stock_list=sl.strip(); st.success("✅ 儲存完成！")
@@ -1975,7 +1705,7 @@ GEMINI_API_KEY = "AIza..."
     """)
     cached=load_results_cache()
     if cached: st.success(f"📦 快取：{len(cached)} 支股票")
-    if st.button("🗑 清除所有快取",width='stretch',key="clear_cache"):
+    if st.button("🗑 清除所有快取",use_container_width=True,key="clear_cache"):
         import shutil
         shutil.rmtree(CACHE_DIR,ignore_errors=True); os.makedirs(CACHE_DIR,exist_ok=True)
         for fn in [fetch_twse_prices_all,fetch_twse_institution_all,
