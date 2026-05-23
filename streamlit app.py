@@ -62,6 +62,64 @@ ALL_STOCKS = {
 _MARKET_NAMES: dict = {}
 
 FINMIND_API = "https://api.finmindtrade.com/api/v4/data"
+
+# ── 手動產業分類字典（可自行在此補充更多代號） ────────────────────
+MANUAL_SECTOR_MAP = {
+    "2330": "半導體",
+    "2303": "半導體",
+    "5347": "半導體",
+    "6770": "半導體",
+    "3105": "半導體",
+    "2454": "IC設計",
+    "3034": "IC設計",
+    "3035": "IC設計",
+    "3443": "IC設計",
+    "3529": "IC設計",
+    "3661": "IC設計",
+    "5274": "IC設計",
+    "4966": "IC設計",
+    "6669": "AI伺服器",
+    "2382": "AI伺服器",
+    "2356": "AI伺服器",
+    "3231": "AI伺服器",
+    "4938": "AI伺服器",
+    "2357": "AI伺服器",
+    "3037": "ABF載板",
+    "2368": "ABF載板",
+    "8046": "ABF載板",
+    "4958": "ABF載板",
+    "3044": "PCB",
+    "2313": "PCB",
+    "3017": "散熱",
+    "2059": "散熱",
+    "1513": "散熱",
+    "3711": "封測",
+    "2449": "封測",
+    "6239": "封測",
+    "2441": "封測",
+    "2408": "記憶體",
+    "2344": "記憶體",
+    "6285": "網通",
+    "3706": "網通",
+    "2308": "電源",
+    "6208": "電源",
+    "2880": "金融",
+    "2881": "金融",
+    "2882": "金融",
+    "2884": "金融",
+    "2885": "金融",
+    "2886": "金融",
+    "2891": "金融",
+    "2892": "金融",
+    "5880": "金融",
+    "2603": "航運",
+    "2609": "航運",
+    "2615": "航運",
+    "6591": "綠能",
+    "3576": "綠能",
+    # 之後可自行在此補充其他代號
+}
+
 GEMINI_MODEL = "gemini-2.0-flash"
 HDR = {"User-Agent":"Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"}
 CACHE_DIR = "/tmp/tw_stock_v63"
@@ -593,73 +651,11 @@ body{background:#1a2332;color:#e8eaf0;font-family:'Helvetica Neue',Arial,sans-se
 
 @st.cache_data(ttl=86400)
 def fetch_official_industry_map(token: str = "") -> dict:
-    """官方產業分類字典 { 股號: 產業名稱 }，優先 FinMind，Fallback TWSE/TPEx。"""
-    mapping = {}
-
-    def clean_name(name):
-        return name.replace("工業", "").replace("業", "") if len(name) > 2 else name
-
-    print("【DEBUG】開始執行 fetch_official_industry_map...")
-
-    # 1. FinMind（優先，含興櫃）
-    if token:
-        try:
-            r = requests.get(
-                FINMIND_API,
-                params={"dataset": "TaiwanStockInfo", "token": token},
-                headers=HDR, timeout=25, verify=False)
-            if r.status_code == 200:
-                for item in r.json().get("data", []):
-                    c = str(item.get("stock_id", "")).strip()
-                    i = str(item.get("industry_category", "")).strip()
-                    if c and i and i not in ("None", ""):
-                        mapping[c] = clean_name(i)
-                print(f"【DEBUG】FinMind 成功載入 {len(mapping)} 筆")
-            else:
-                print(f"【DEBUG】FinMind API 錯誤狀態碼: {r.status_code}")
-        except Exception as e:
-            print(f"【DEBUG】FinMind API 錯誤: {e}")
-
-    if mapping:
-        return mapping
-
-    # 2. Fallback：TWSE
-    try:
-        r = requests.get(
-            "https://openapi.twse.com.tw/v1/opendata/t187ap03_L",
-            headers=HDR, timeout=25, verify=False)
-        if r.status_code == 200:
-            for item in r.json():
-                c = str(item.get("公司代號", "")).strip()
-                i = str(item.get("產業類別", "")).strip()
-                if c and i:
-                    mapping[c] = clean_name(i)
-            print(f"【DEBUG】TWSE 成功載入 {len(mapping)} 筆")
-        else:
-            print(f"【DEBUG】TWSE 狀態碼: {r.status_code}")
-    except Exception as e:
-        print(f"【DEBUG】TWSE API 錯誤: {e}")
-
-    # 3. Fallback：TPEx
-    try:
-        r = requests.get(
-            "https://www.tpex.org.tw/openapi/v1/tpex_listed_companies",
-            headers=HDR, timeout=25, verify=False)
-        if r.status_code == 200:
-            before = len(mapping)
-            for item in r.json():
-                c = str(item.get("SecuritiesCompanyCode", "")).strip()
-                i = str(item.get("Industry", "")).strip()
-                if c and i:
-                    mapping[c] = clean_name(i)
-            print(f"【DEBUG】TPEx 新增 {len(mapping)-before} 筆，合計 {len(mapping)} 筆")
-        else:
-            print(f"【DEBUG】TPEx 狀態碼: {r.status_code}")
-    except Exception as e:
-        print(f"【DEBUG】TPEx API 錯誤: {e}")
-
-    print(f"【DEBUG】fetch_official_industry_map 完成，共 {len(mapping)} 筆")
-    return mapping
+    """
+    回傳手動維護的產業分類字典 MANUAL_SECTOR_MAP。
+    token 參數保留以維持介面相容性，目前不使用。
+    """
+    return MANUAL_SECTOR_MAP
 
 @st.cache_data(ttl=86400)
 def fetch_official_sectors(token: str = "") -> dict:
@@ -1308,26 +1304,40 @@ def build_full_html(results):
 
 # ── 籌碼掃描：産業分析 ────────────────────────────────────────
 def compute_sector_stats(prices, insts, hard_risk, sector_mapping):
-    """依官方產業分類動態分群，回傳各產業統計列表。"""
+    """
+    依 sector_mapping 動態分群，回傳各產業統計列表。
+    - 查無分類的股票歸入「其他」。
+    - price / vol 為 None 或 <= 0 者直接跳過，確保前端資料乾淨。
+    """
     from collections import defaultdict
-    total_vol = sum(p.get("volume", 0) or 0 for p in prices.values()) or 1
-    sector_groups = defaultdict(list)
+    total_vol    = sum((p.get("volume") or 0) for p in prices.values()) or 1
+    sector_groups: dict = defaultdict(list)
 
     for code, p in prices.items():
-        if code in hard_risk or not p or p.get("price", 0) <= 0:
+        # ── 防呆過濾 ──────────────────────────────────────────
+        if code in hard_risk:
             continue
+        if p is None:
+            continue
+        price = p.get("price") or 0
+        vol   = p.get("volume") or 0
+        if price <= 0 or vol <= 0:          # 過濾掉無效報價，防止 JS 渲染崩潰
+            continue
+        # ── 產業分類 ──────────────────────────────────────────
         sec_name = sector_mapping.get(code, "其他")
-        inst = insts.get(code, {})
+        inst     = insts.get(code, {})
+        chg      = p.get("chg_pct") or 0
         sector_groups[sec_name].append({
             "code":  code,
             "name":  nm(code),
-            "price": p["price"],
-            "chg":   p.get("chg_pct", 0) or 0,
-            "vol":   p.get("volume", 0) or 0,
-            "f":     inst.get("f", 0) or 0,
-            "t":     inst.get("t", 0) or 0,
+            "price": price,
+            "chg":   chg,
+            "vol":   vol,
+            "f":     inst.get("f") or 0,
+            "t":     inst.get("t") or 0,
         })
 
+    # ── 彙整統計 ─────────────────────────────────────────────
     stats = []
     for sec_name, stocks in sector_groups.items():
         if not stocks:
