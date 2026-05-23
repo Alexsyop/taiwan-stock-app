@@ -910,7 +910,7 @@ def calc_quant_score(p, d5, d200, fc, tc, pe, pea, rev_yoy, tp,
     ④ 籌碼面：連買/連賣天數 + 異常爆量否決條件
     ⑤ S級防禦：80+分需有法人買超或營收正向支撐
     """
-    sc = 50; pos = []; neg = []; warn = []
+    sc = 50; pos = []; neg = []; warn = []; _dtl = [('起始分數', 0, 50)]
 
     # ── ① 技術面：5日線乖離 + 趨勢濾網 ─────────────────────────
     if d5 is not None:
@@ -926,7 +926,7 @@ def calc_quant_score(p, d5, d200, fc, tc, pe, pea, rev_yoy, tp,
             else:
                 sc -= 5; neg.append(f"5日乖離{d5:+.1f}%且跌破月線季線，空頭趨勢接刀高風險")
         elif d5 <= 2:
-            sc += 10; pos.append(f"5日乖離健康{d5:+.1f}%")
+            sc += 10; pos.append(f"5日乖離健康{d5:+.1f}%"); _dtl.append((f"5日乖離{d5:+.1f}%健康", 10, max(0,min(100,sc))))
         elif d5 <= 8:
             sc += 2; warn.append(f"5日乖離偏高{d5:+.1f}%，稍注意追高風險")
         else:
@@ -936,7 +936,7 @@ def calc_quant_score(p, d5, d200, fc, tc, pe, pea, rev_yoy, tp,
     if d200 and d200 > 80:
         sc -= 5; warn.append(f"年線乖離偏高{d200:+.1f}%（半導體牛市可接受，請搭配基本面確認）")
     elif d200 and d200 > 50:
-        sc -= 2; warn.append(f"年線乖離稍高{d200:+.1f}%")
+        sc -= 2; warn.append(f"年線乖離稍高{d200:+.1f}%"); _dtl.append((f"年線乖離{d200:+.1f}%稍高", -2, max(0,min(100,sc))))
 
     # ── ② 目標價：以「最高分析師目標」為加分基準 ───────────────
     # 超越均值目標不扣分（分析師均值可能落後市場），超越最高目標才給小懲罰
@@ -1055,7 +1055,7 @@ def calc_quant_score(p, d5, d200, fc, tc, pe, pea, rev_yoy, tp,
     else:
         rt, lb = "C", "避　開"
 
-    return sc, rt, lb, pos, neg, warn
+    return sc, rt, lb, pos, neg, warn, _dtl
 
 # ─────────────────────────────────────────────────────────────
 # 主分析
@@ -1092,7 +1092,7 @@ def analyze(sid,token,disposed,full_delivery,delisting,gemini_del,force=False):
         if ya: tp=ya["target"]; tp_h=ya["high"]; tp_l=ya["low"]; tp_n=ya["count"]; ts=ya["source"]
         elif pea and pe and rev_yoy is not None and pe>0:
             tp=round(p*(pea/pe)*min(max(1+rev_yoy/100,0.7),1.8),0); ts="PE均值×成長估算"
-        sc,rt,lb,pos,neg,warn=calc_quant_score(
+        sc,rt,lb,pos,neg,warn,_dtl=calc_quant_score(
             p, d5, d200, fc, tc, pe, pea, rev_yoy, tp,
             tp_h=tp_h, ma20=ma20, ma60=ma60, rev_mom=rev_mom, inst=inst)
 
@@ -1136,7 +1136,8 @@ def analyze(sid,token,disposed,full_delivery,delisting,gemini_del,force=False):
                 "tp":tp,"ts":ts,"tp_h":tp_h,"tp_l":tp_l,"tp_n":tp_n,
                 "score":sc,"rating":rt,"label":lb,"pos":pos,"neg":neg,"warn":warn,
                 "is_disposed":is_disposed,"is_full_del":is_full_del,
-                "is_delisting":is_delisting,"is_hard_risk":is_hard_risk,"date":last["date"]}
+                "is_delisting":is_delisting,"is_hard_risk":is_hard_risk,"date":last["date"],
+                "score_detail":_dtl}
         save_cache(sid,result); return result,None
     except Exception as e: return None,str(e)
 
@@ -1439,6 +1440,41 @@ def build_wiwynn(r):
     if r["pos"]: pos_html="<span style='color:#4ecca3'>正：</span>"+"、".join(r['pos'][:2])+"<br>"
     neg_html=""
     if r["neg"]: neg_html="<span style='color:#ff6b6b'>負：</span>"+"、".join(r['neg'][:2])
+    # ── 評分明細表格生成 ────────────────────────────────────────
+    score_detail_rows = ""
+    running = 50
+    score_detail_rows += (
+        f'<tr style="border-bottom:1px solid #2c3e50">' +
+        f'<td style="padding:3px 6px;color:#8fa3b8">起始分數</td>' +
+        f'<td style="text-align:right;padding:3px 6px;color:#e8eaf0">—</td>' +
+        f'<td style="text-align:right;padding:3px 6px;color:#e8eaf0">50</td></tr>'
+    )
+    _detail_list = r.get("score_detail", [])
+    for item_name, item_delta, item_total in _detail_list:
+        if item_delta == 0: continue
+        d_color = "#4ecca3" if item_delta > 0 else "#ff6b6b"
+        d_sign  = "+" if item_delta > 0 else ""
+        score_detail_rows += (
+            f'<tr style="border-bottom:1px solid #2c3e50">' +
+            f'<td style="padding:3px 6px;color:#e8eaf0">{item_name}</td>' +
+            f'<td style="text-align:right;padding:3px 6px;color:{d_color};font-weight:600">{d_sign}{item_delta}</td>' +
+            f'<td style="text-align:right;padding:3px 6px;color:#e8eaf0">{item_total}</td></tr>'
+        )
+    # 加入 pos/neg 未在 detail 中的項目（補充說明）
+    all_factors = [name for name,_,_ in _detail_list]
+    if not _detail_list:  # 若無明細（老版快取），用正負面清單代替
+        for p_item in r.get("pos",[]):
+            score_detail_rows += (
+                f'<tr style="border-bottom:1px solid #2c3e50">' +
+                f'<td style="padding:3px 6px;color:#4ecca3">✅ {p_item[:30]}</td>' +
+                f'<td colspan="2" style="text-align:right;padding:3px 6px;color:#4ecca3">正向</td></tr>'
+            )
+        for n_item in r.get("neg",[]):
+            score_detail_rows += (
+                f'<tr style="border-bottom:1px solid #2c3e50">' +
+                f'<td style="padding:3px 6px;color:#ff6b6b">❌ {n_item[:30]}</td>' +
+                f'<td colspan="2" style="text-align:right;padding:3px 6px;color:#ff6b6b">負向</td></tr>'
+            )
     return f"""<!DOCTYPE html><html lang="zh-TW"><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>{r['name']} {sid}</title><style>{WCSS}</style></head>
 <body><div class="wrap">
 <div class="hdr"><div style="display:flex;justify-content:space-between;align-items:flex-start">
@@ -1490,7 +1526,7 @@ def build_wiwynn(r):
 <table class="inst-tbl"><tr><th>日期</th><th>外資</th><th>投信</th><th>自營</th><th>合計</th></tr>{inst_rows}</table>
 </div>
 {tp_card}{val_card}
-<div class="card"><p class="ct">📅 事件更新</p>{ev_html}</div>
+<div class="card"><p class="ct">📊 評分明細（各項貢獻）</p><div style="font-size:11px;color:#8fa3b8;margin-bottom:8px">起始50分，以下為各因素加減分明細</div><table style="width:100%;border-collapse:collapse;font-size:11px"><tr style="border-bottom:1px solid #3d5166"><th style="text-align:left;color:#8fa3b8;padding:3px 4px">因素</th><th style="text-align:right;color:#8fa3b8;padding:3px 4px">貢獻</th><th style="text-align:right;color:#8fa3b8;padding:3px 4px">累計</th></tr>{score_detail_rows}<tr style="border-top:2px solid #5d7a99;font-weight:700"><td style="padding:5px 4px;color:#e8eaf0">總分</td><td></td><td style="text-align:right;padding:5px 4px;font-size:14px;color:{vbc}">{sc}/100</td></tr></table></div><div class="card"><p class="ct">📅 事件更新</p>{ev_html}</div>
 <div class="card"><p class="ct">🎯 操作策略</p>
 <div class="st"><span class="si">🟢</span><div><strong>積極進場：</strong>{ea}</div></div>
 <div class="st"><span class="si">🟡</span><div><strong>保守進場：</strong>{fv(ma20,'元',0)}（月線支撐）</div></div>
