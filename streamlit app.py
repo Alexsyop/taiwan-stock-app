@@ -1467,7 +1467,7 @@ def tab_scanner():
                   for s in s_data["stocks"]]
             if rows:
                 rows.sort(key=lambda x:x["漲跌%"],reverse=True)
-                st.dataframe(pd.DataFrame(rows),use_container_width=True,hide_index=True)
+                st.dataframe(pd.DataFrame(rows),width='stretch',hide_index=True)
                 avg_chg2=round(sum(r["漲跌%"] for r in rows)/len(rows),2)
                 up_cnt=sum(1 for r in rows if r["漲跌%"]>0)
                 cc1,cc2,cc3=st.columns(3)
@@ -1657,7 +1657,7 @@ def tab_rank():
                       "目標":f"{r['tp']:,.0f}" if r.get("tp") else "-",
                       "風控":("🚨全額交割" if r.get("is_full_del") else "⚠️下市" if r.get("is_delisting") else "⏱處置" if r.get("is_disposed") else "正常")}
                      for r in results])
-    st.dataframe(df,use_container_width=True,hide_index=True)
+    st.dataframe(df,width='stretch',hide_index=True)
     buy2=[r for r in results if r["fc"]>0 and r["tc"]>0 and not r.get("is_hard_risk",False)]
     if buy2:
         st.markdown("### ✅ 外資+投信同向買超")
