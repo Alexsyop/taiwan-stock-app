@@ -146,84 +146,119 @@ def con_days(series):
     return c*d
 
 @st.cache_data(ttl=86400)          # 每日更新一次
-def fetch_all_stock_names() -> dict:
+@st.cache_data(ttl=86400)
+def fetch_all_stock_names(token: str = "") -> dict:
     """
     全市場股票名稱字典（上市 + 上櫃 + 興櫃），快取 24 小時。
-    不需要 Token，使用 TWSE / TPEx 免費 OpenAPI。
+
+    查詢優先順序：
+    1. FinMind TaiwanStockInfo（最完整，含興櫃；需要 Token）
+    2. Fallback：TWSE / TPEx OpenAPI（免費，不需要 Token）
+
+    過濾規則（去除權證 / 牛熊證）：
+    - 4 位代號：全部保留（一般股票）
+    - 5 位代號以 "00" 開頭：保留（ETF，如 00878, 00929）
+    - 6 位代號以 "00" 開頭：保留（ETF，如 006205）
+    - 長度 ≥ 6 且不以 "00" 開頭：直接跳過（權證 / 牛熊，如 707769）
     """
     names: dict = dict(ALL_STOCKS)   # 先載入硬編碼庫
 
-    # ── 上市（TWSE）：STOCK_DAY_ALL 含名稱 ─────────────────────
+    def _add(code: str, name: str) -> None:
+        """套用過濾規則後寫入字典"""
+        code = str(code).strip(); name = str(name).strip()
+        if not code or not name:
+            return
+        # ── 權證過濾器 ───────────────────────────────────────────
+        if len(code) >= 6 and not code.startswith("00"):
+            return          # 跳過權證 / 牛熊（如 707769, 030705）
+        # ────────────────────────────────────────────────────────
+        names[code] = name
+
+    finmind_ok = False
+
+    # ══════════════════════════════════════════════════════════════
+    # 1. 主要來源：FinMind TaiwanStockInfo（含上市/上櫃/興櫃）
+    # ══════════════════════════════════════════════════════════════
+    if token:
+        try:
+            r = requests.get(
+                FINMIND_API,
+                params={"dataset": "TaiwanStockInfo", "token": token},
+                headers=HDR, timeout=30, verify=False
+            )
+            if r.status_code == 200:
+                payload = r.json()
+                data = payload.get("data", [])
+                if data:
+                    for item in data:
+                        _add(item.get("stock_id", ""), item.get("stock_name", ""))
+                    finmind_ok = True
+        except Exception:
+            pass
+
+    if finmind_ok:
+        return names   # FinMind 成功，直接回傳（含完整興櫃）
+
+    # ══════════════════════════════════════════════════════════════
+    # 2. Fallback：TWSE / TPEx OpenAPI
+    # ══════════════════════════════════════════════════════════════
+
+    # ── 上市（TWSE）：每日行情（含名稱）────────────────────────
     try:
         r = requests.get(
             "https://openapi.twse.com.tw/v1/exchangeReport/STOCK_DAY_ALL",
             headers=HDR, timeout=25, verify=False)
         if r.status_code == 200:
             for item in r.json():
-                code = str(item.get("Code","")).strip()
-                name = str(item.get("Name","")).strip()
-                if code and name and len(code) >= 4:
-                    names[code] = name
+                _add(item.get("Code",""), item.get("Name",""))
     except Exception:
         pass
 
-    # ── 上市（TWSE）：BWIBBU_ALL 補充（PE 資料但含股名）──────────
-    try:
-        r = requests.get(
-            "https://openapi.twse.com.tw/v1/exchangeReport/BWIBBU_ALL",
-            headers=HDR, timeout=25, verify=False)
-        if r.status_code == 200:
-            for item in r.json():
-                code = str(item.get("Code","")).strip()
-                name = str(item.get("Name","")).strip()
-                if code and name and code not in names:
-                    names[code] = name
-    except Exception:
-        pass
-
-    # ── 上市（TWSE）：公司基本資料（含股票名稱）───────────────────
+    # ── 上市（TWSE）：公司基本資料 ──────────────────────────────
     try:
         r = requests.get(
             "https://openapi.twse.com.tw/v1/opendata/t187ap03_L",
             headers=HDR, timeout=25, verify=False)
         if r.status_code == 200:
             for item in r.json():
-                code = str(item.get("公司代號","")).strip()
-                name = str(item.get("公司簡稱","")).strip()
-                if code and name and len(code) >= 4:
-                    names[code] = name
+                _add(item.get("公司代號",""), item.get("公司簡稱",""))
     except Exception:
         pass
 
-    # ── 上櫃（TPEx）：每日收盤含名稱 ──────────────────────────────
+    # ── 上市（TWSE）：BWIBBU_ALL 補充 ───────────────────────────
+    try:
+        r = requests.get(
+            "https://openapi.twse.com.tw/v1/exchangeReport/BWIBBU_ALL",
+            headers=HDR, timeout=25, verify=False)
+        if r.status_code == 200:
+            for item in r.json():
+                _add(item.get("Code",""), item.get("Name",""))
+    except Exception:
+        pass
+
+    # ── 上櫃（TPEx）：每日收盤 ──────────────────────────────────
     try:
         r = requests.get(
             "https://www.tpex.org.tw/openapi/v1/tpex_mainboard_daily_close_quotes",
             headers=HDR, timeout=25, verify=False)
         if r.status_code == 200:
             for item in r.json():
-                code = str(item.get("SecuritiesCompanyCode","")).strip()
-                name = str(item.get("CompanyName","")).strip()
-                if code and name:
-                    names[code] = name
+                _add(item.get("SecuritiesCompanyCode",""), item.get("CompanyName",""))
     except Exception:
         pass
 
-    # ── 上櫃（TPEx）：公司清單 ─────────────────────────────────────
+    # ── 上櫃（TPEx）：公司清單 ──────────────────────────────────
     try:
         r = requests.get(
             "https://www.tpex.org.tw/openapi/v1/tpex_listed_companies",
             headers=HDR, timeout=25, verify=False)
         if r.status_code == 200:
             for item in r.json():
-                code = str(item.get("SecuritiesCompanyCode","")).strip()
-                name = str(item.get("CompanyName","")).strip()
-                if code and name:
-                    names[code] = name
+                _add(item.get("SecuritiesCompanyCode",""), item.get("CompanyName",""))
     except Exception:
         pass
 
-    # ── 興櫃（TPEx Emerging）：每日行情含名稱 ─────────────────────
+    # ── 興櫃（TPEx Emerging）──────────────────────────────────────
     for esm_url in [
         "https://www.tpex.org.tw/openapi/v1/tpex_esm_daily_close_quotes",
         "https://www.tpex.org.tw/openapi/v1/tpex_esm_list",
@@ -232,12 +267,9 @@ def fetch_all_stock_names() -> dict:
             r = requests.get(esm_url, headers=HDR, timeout=20, verify=False)
             if r.status_code == 200:
                 for item in r.json():
-                    code = str(item.get("SecuritiesCompanyCode",
-                                        item.get("code",""))).strip()
-                    name = str(item.get("CompanyName",
-                                        item.get("name",""))).strip()
-                    if code and name:
-                        names[code] = name
+                    code = item.get("SecuritiesCompanyCode", item.get("code",""))
+                    name = item.get("CompanyName", item.get("name",""))
+                    _add(code, name)
         except Exception:
             continue
 
@@ -260,7 +292,8 @@ def nm(sid: str) -> str:
         return _MARKET_NAMES[sid]
     # 路徑 3：全市場快取（第一次略慢，之後 O(1)）
     try:
-        all_names = fetch_all_stock_names()
+        _token = st.session_state.get("token", "") if hasattr(st, "session_state") else ""
+        all_names = fetch_all_stock_names(_token)
         if sid in all_names:
             _MARKET_NAMES[sid] = all_names[sid]   # 寫入動態快取，下次更快
             return all_names[sid]
@@ -304,7 +337,8 @@ def search_stocks(query: str) -> list:
 
     # 取得全市場名稱字典（帶快取，第一次略慢）
     try:
-        universe = fetch_all_stock_names()
+        _token = st.session_state.get("token", "") if hasattr(st, "session_state") else ""
+        universe = fetch_all_stock_names(_token)
     except Exception:
         # 若 Streamlit context 尚未就緒，退化到本地字典
         universe = {**ALL_STOCKS, **_MARKET_NAMES}
