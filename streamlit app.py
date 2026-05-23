@@ -1366,6 +1366,14 @@ def compute_sector_stats(prices, insts, hard_risk, sector_mapping):
             "dn":        dn,
             "stocks":    sorted(stocks, key=lambda x: x["chg"], reverse=True),
         })
+        # ── 代號清洗後對照產業分類 ───────────────────────────
+        norm_code = normalize_code(code)
+        sec_name  = sector_mapping.get(norm_code, "其他")
+        
+        # --- 新增這行進行除錯 ---
+        if norm_code == "2330":
+            print(f"【DEBUG】正在處理 2330, 對應的產業名稱為: {sec_name}")
+        # ----------------------
     return stats
 
 def build_treemap_html(stocks, title):
@@ -1738,7 +1746,9 @@ def tab_scanner():
         with tab_heat:
             if s_data["stocks"]:
                 heat_html=build_treemap_html(s_data["stocks"],f"{sec_name} 熱力圖")
-                st.iframe(heat_html,height=560)
+                # 移除 scrolling 參數後的正確寫法
+                components.iframe(
+                src=f"data:text/html;charset=utf-8,{requests.utils.quote(heat_html)}",height=560)
             else: st.info("此產業今日無數據")
 
 def tab_analysis():
