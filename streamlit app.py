@@ -1103,7 +1103,7 @@ def build_wiwynn(r):
 <p style="font-size:10px;font-weight:600;color:#8fa3b8;margin-bottom:7px">5日線乖離趨勢</p>{trend}
 </div>
 <div class="rbar"><div class="rn" style="left:{min(sc,99)}%"></div></div>
-<div class="rsc"><span>0安全</span><span>50中性</span><span>80極危</span><span>100</span></div>
+<div class="rsc"><span>0極危</span><span>50中性</span><span>80安全</span><span>100</span></div>
 <div class="rfg">
 <div class="rf"><p>MA20</p><p>{fv(ma20,'元',0)}</p></div>
 <div class="rf"><p>MA60</p><p>{fv(r.get('ma60'),'元',0)}</p></div>
