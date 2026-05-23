@@ -145,13 +145,138 @@ def con_days(series):
         else: break
     return c*d
 
-def nm(s): return ALL_STOCKS.get(s) or _MARKET_NAMES.get(s) or s
+@st.cache_data(ttl=86400)          # 每日更新一次
+def fetch_all_stock_names() -> dict:
+    """
+    全市場股票名稱字典（上市 + 上櫃 + 興櫃），快取 24 小時。
+    不需要 Token，使用 TWSE / TPEx 免費 OpenAPI。
+    """
+    names: dict = dict(ALL_STOCKS)   # 先載入硬編碼庫
 
-def update_market_names(prices_dict):
+    # ── 上市（TWSE）：STOCK_DAY_ALL 含名稱 ─────────────────────
+    try:
+        r = requests.get(
+            "https://openapi.twse.com.tw/v1/exchangeReport/STOCK_DAY_ALL",
+            headers=HDR, timeout=25, verify=False)
+        if r.status_code == 200:
+            for item in r.json():
+                code = str(item.get("Code","")).strip()
+                name = str(item.get("Name","")).strip()
+                if code and name and len(code) >= 4:
+                    names[code] = name
+    except Exception:
+        pass
+
+    # ── 上市（TWSE）：BWIBBU_ALL 補充（PE 資料但含股名）──────────
+    try:
+        r = requests.get(
+            "https://openapi.twse.com.tw/v1/exchangeReport/BWIBBU_ALL",
+            headers=HDR, timeout=25, verify=False)
+        if r.status_code == 200:
+            for item in r.json():
+                code = str(item.get("Code","")).strip()
+                name = str(item.get("Name","")).strip()
+                if code and name and code not in names:
+                    names[code] = name
+    except Exception:
+        pass
+
+    # ── 上市（TWSE）：公司基本資料（含股票名稱）───────────────────
+    try:
+        r = requests.get(
+            "https://openapi.twse.com.tw/v1/opendata/t187ap03_L",
+            headers=HDR, timeout=25, verify=False)
+        if r.status_code == 200:
+            for item in r.json():
+                code = str(item.get("公司代號","")).strip()
+                name = str(item.get("公司簡稱","")).strip()
+                if code and name and len(code) >= 4:
+                    names[code] = name
+    except Exception:
+        pass
+
+    # ── 上櫃（TPEx）：每日收盤含名稱 ──────────────────────────────
+    try:
+        r = requests.get(
+            "https://www.tpex.org.tw/openapi/v1/tpex_mainboard_daily_close_quotes",
+            headers=HDR, timeout=25, verify=False)
+        if r.status_code == 200:
+            for item in r.json():
+                code = str(item.get("SecuritiesCompanyCode","")).strip()
+                name = str(item.get("CompanyName","")).strip()
+                if code and name:
+                    names[code] = name
+    except Exception:
+        pass
+
+    # ── 上櫃（TPEx）：公司清單 ─────────────────────────────────────
+    try:
+        r = requests.get(
+            "https://www.tpex.org.tw/openapi/v1/tpex_listed_companies",
+            headers=HDR, timeout=25, verify=False)
+        if r.status_code == 200:
+            for item in r.json():
+                code = str(item.get("SecuritiesCompanyCode","")).strip()
+                name = str(item.get("CompanyName","")).strip()
+                if code and name:
+                    names[code] = name
+    except Exception:
+        pass
+
+    # ── 興櫃（TPEx Emerging）：每日行情含名稱 ─────────────────────
+    for esm_url in [
+        "https://www.tpex.org.tw/openapi/v1/tpex_esm_daily_close_quotes",
+        "https://www.tpex.org.tw/openapi/v1/tpex_esm_list",
+    ]:
+        try:
+            r = requests.get(esm_url, headers=HDR, timeout=20, verify=False)
+            if r.status_code == 200:
+                for item in r.json():
+                    code = str(item.get("SecuritiesCompanyCode",
+                                        item.get("code",""))).strip()
+                    name = str(item.get("CompanyName",
+                                        item.get("name",""))).strip()
+                    if code and name:
+                        names[code] = name
+        except Exception:
+            continue
+
+    return names
+
+
+def nm(sid: str) -> str:
+    """
+    取得股票中文名稱，查詢優先順序：
+    1. ALL_STOCKS（硬編碼，速度最快）
+    2. _MARKET_NAMES（執行期動態快取）
+    3. fetch_all_stock_names()（全市場 API，帶 st.cache_data）
+    4. fallback 回傳股號本身（絕不顯示 "7769 7769"）
+    """
+    # 快速路徑 1：硬編碼字典
+    if sid in ALL_STOCKS:
+        return ALL_STOCKS[sid]
+    # 快速路徑 2：動態快取
+    if sid in _MARKET_NAMES:
+        return _MARKET_NAMES[sid]
+    # 路徑 3：全市場快取（第一次略慢，之後 O(1)）
+    try:
+        all_names = fetch_all_stock_names()
+        if sid in all_names:
+            _MARKET_NAMES[sid] = all_names[sid]   # 寫入動態快取，下次更快
+            return all_names[sid]
+    except Exception:
+        pass
+    # Fallback：回傳股號（不會出現「7769 7769」）
+    return sid
+
+
+def update_market_names(prices_dict: dict) -> None:
+    """從市場價格數據批次更新 _MARKET_NAMES 動態快取"""
     global _MARKET_NAMES
     for sid, data in prices_dict.items():
-        n = data.get("name","")
-        if n: _MARKET_NAMES[sid] = n
+        n = data.get("name", "")
+        if n:
+            _MARKET_NAMES[sid] = n
 
 def last_trading_days(n=5):
     now_tw = datetime.utcnow() + timedelta(hours=8)
@@ -168,13 +293,41 @@ def get_inst_date_str():
     while d.weekday()>=5: d -= timedelta(days=1)
     return d.strftime("%Y%m%d")
 
-def search_stocks(query):
+def search_stocks(query: str) -> list:
+    """
+    搜尋全市場股票（上市+上櫃+興櫃）。
+    優先使用 fetch_all_stock_names()，確保興櫃也能找到。
+    """
     q = query.strip()
-    if not q: return []
-    res = [(c,n) for c,n in ALL_STOCKS.items() if q in c or q in n]
-    res += [(c,n) for c,n in _MARKET_NAMES.items() if q in c or q in n and c not in dict(res)]
-    res.sort(key=lambda x:(0 if x[0]==q else 1 if x[0].startswith(q) else 2 if q in x[0] else 3))
-    return res[:20]
+    if not q:
+        return []
+
+    # 取得全市場名稱字典（帶快取，第一次略慢）
+    try:
+        universe = fetch_all_stock_names()
+    except Exception:
+        # 若 Streamlit context 尚未就緒，退化到本地字典
+        universe = {**ALL_STOCKS, **_MARKET_NAMES}
+
+    # 比對股號或名稱片段
+    seen: set = set()
+    res: list = []
+    for code, name in universe.items():
+        if q in code or q in name:
+            if code not in seen:
+                seen.add(code)
+                res.append((code, name))
+
+    # 排序：完全符合股號 > 股號前綴 > 股號包含 > 名稱包含
+    def rank(item):
+        c, n = item
+        if c == q:          return 0
+        if c.startswith(q): return 1
+        if q in c:          return 2
+        return 3
+
+    res.sort(key=rank)
+    return res[:25]
 
 # ── 持久快取 ──────────────────────────────────────────────────
 def cache_path(sid): return os.path.join(CACHE_DIR, f"{sid}.json")
