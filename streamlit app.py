@@ -1467,7 +1467,7 @@ def tab_scanner():
                   for s in s_data["stocks"]]
             if rows:
                 rows.sort(key=lambda x:x["漲跌%"],reverse=True)
-                st.dataframe(pd.DataFrame(rows),width='stretch',hide_index=True)
+                st.dataframe(pd.DataFrame(rows),use_container_width=True,hide_index=True)
                 avg_chg2=round(sum(r["漲跌%"] for r in rows)/len(rows),2)
                 up_cnt=sum(1 for r in rows if r["漲跌%"]>0)
                 cc1,cc2,cc3=st.columns(3)
@@ -1478,7 +1478,7 @@ def tab_scanner():
         with tab_heat:
             if s_data["stocks"]:
                 heat_html=build_treemap_html(s_data["stocks"],f"{sec_name} 熱力圖")
-                st.iframe(src=f"data:text/html;charset=utf-8,{requests.utils.quote(html)}", height=2700)
+                components.html(heat_html,height=560,scrolling=False)
             else: st.info("此產業今日無數據")
 
 def tab_analysis():
@@ -1589,8 +1589,7 @@ def tab_analysis():
                 if idx is not None: st.session_state.results[idx]=new_r
                 save_results_cache(st.session_state.results); st.success("✅ 已更新"); st.rerun()
             else: st.error(f"❌ {err}")
-    html = "<body style='background:#1a2332;color:#fff;'>暫無行事曆資料</body>"
-    sst.iframe(src=f"data:text/html;charset=utf-8,{requests.utils.quote(html)}", height=2700)
+    components.html(html,height=2700,scrolling=True)
 
 def tab_calendar():
     st.markdown("### 📅 財經行事曆")
@@ -1640,7 +1639,7 @@ def tab_calendar():
     co3.metric("🔴 利空",bear_cnt); co4.metric("⚪ 中性",len(events)-bull_cnt-bear_cnt)
     try:
         cal_html=build_calendar_html(events,st.session_state.cal_year,st.session_state.cal_month)
-        st.iframe(src=f"data:text/html;charset=utf-8,{requests.utils.quote(html)}", height=2700)
+        components.html(cal_html,height=1250,scrolling=True)
     except Exception as e:
         st.error(f"月曆渲染失敗：{e}")
         pfx=f"{st.session_state.cal_year}-{st.session_state.cal_month:02d}"
@@ -1658,7 +1657,7 @@ def tab_rank():
                       "目標":f"{r['tp']:,.0f}" if r.get("tp") else "-",
                       "風控":("🚨全額交割" if r.get("is_full_del") else "⚠️下市" if r.get("is_delisting") else "⏱處置" if r.get("is_disposed") else "正常")}
                      for r in results])
-    st.dataframe(df,width='stretch',hide_index=True)
+    st.dataframe(df,use_container_width=True,hide_index=True)
     buy2=[r for r in results if r["fc"]>0 and r["tc"]>0 and not r.get("is_hard_risk",False)]
     if buy2:
         st.markdown("### ✅ 外資+投信同向買超")
