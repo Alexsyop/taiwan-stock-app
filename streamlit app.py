@@ -590,6 +590,45 @@ body{background:#1a2332;color:#e8eaf0;font-family:'Helvetica Neue',Arial,sans-se
 # ── 風控 API ─────────────────────────────────────────────────
 
 # ── 官方產業分類快取 ──────────────────────────────────────────
+
+@st.cache_data(ttl=86400)
+def fetch_official_industry_map() -> dict:
+    """官方產業分類字典 { 股號: 產業名稱 }，24 小時快取。"""
+    mapping = {}
+
+    def clean_name(name):
+        return name.replace("工業", "").replace("業", "") if len(name) > 2 else name
+
+    # 上市（TWSE）
+    try:
+        r = requests.get(
+            "https://openapi.twse.com.tw/v1/opendata/t187ap03_L",
+            headers=HDR, timeout=25, verify=False)
+        if r.status_code == 200:
+            for item in r.json():
+                c = str(item.get("公司代號", "")).strip()
+                i = str(item.get("產業類別", "")).strip()
+                if c and i:
+                    mapping[c] = clean_name(i)
+    except Exception:
+        pass
+
+    # 上櫃（TPEx）
+    try:
+        r = requests.get(
+            "https://www.tpex.org.tw/openapi/v1/tpex_listed_companies",
+            headers=HDR, timeout=25, verify=False)
+        if r.status_code == 200:
+            for item in r.json():
+                c = str(item.get("SecuritiesCompanyCode", "")).strip()
+                i = str(item.get("Industry", "")).strip()
+                if c and i:
+                    mapping[c] = clean_name(i)
+    except Exception:
+        pass
+
+    return mapping
+
 @st.cache_data(ttl=86400)
 def fetch_official_sectors(token: str = "") -> dict:
     mapping = {}
@@ -1191,39 +1230,30 @@ def build_full_html(results):
             f'{nav}</div>{cards}</div></body></html>')
 
 # ── 籌碼掃描：産業分析 ────────────────────────────────────────
-def compute_sector_stats(prices: dict, insts: dict,
-                          hard_risk: set, sector_mapping: dict) -> list:
-    """
-    依官方產業分類動態分群，統計各產業漲跌、成交量、法人買賣。
-    sector_mapping：{ "股號": "官方產業名稱" }（from fetch_official_sectors()）
-    查無分類的股票一律歸入「其他」，確保全市場覆蓋。
-    """
-    from collections import defaultdict as _dd
-
+def compute_sector_stats(prices, insts, hard_risk):
+    """動態讀取官方產業分類，不再依賴硬編碼 SECTOR_MAP。"""
+    from collections import defaultdict
+    sector_mapping = fetch_official_industry_map()
     total_vol = sum(p.get("volume", 0) or 0 for p in prices.values()) or 1
-    bucket: dict = _dd(list)
+    sector_groups = defaultdict(list)
 
-    # ── 動態分群：遍歷所有有報價的股票 ───────────────────────
     for code, p in prices.items():
-        if code in hard_risk:
+        if code in hard_risk or not p or p.get("price", 0) <= 0:
             continue
-        if not p or p.get("price", 0) <= 0:
-            continue
-        sector = sector_mapping.get(code, "") or "其他"
+        sec_name = sector_mapping.get(code, "其他")
         inst = insts.get(code, {})
-        bucket[sector].append({
+        sector_groups[sec_name].append({
             "code":  code,
             "name":  nm(code),
             "price": p["price"],
             "chg":   p.get("chg_pct", 0) or 0,
-            "vol":   p.get("volume",  0) or 0,
+            "vol":   p.get("volume", 0) or 0,
             "f":     inst.get("f", 0) or 0,
             "t":     inst.get("t", 0) or 0,
         })
 
-    # ── 彙整統計 ─────────────────────────────────────────────
     stats = []
-    for sec_name, stocks in bucket.items():
+    for sec_name, stocks in sector_groups.items():
         if not stocks:
             continue
         total_v  = sum(s["vol"] for s in stocks)
@@ -1233,7 +1263,7 @@ def compute_sector_stats(prices: dict, insts: dict,
         dn  = sum(1 for s in stocks if s["chg"] < 0)
         stats.append({
             "name":      sec_name,
-            "desc":      f"{len(stocks)} 支成份股",
+            "desc":      f"共 {len(stocks)} 檔",
             "count":     len(stocks),
             "avg_chg":   avg_chg,
             "total_vol": total_v,
@@ -1243,7 +1273,6 @@ def compute_sector_stats(prices: dict, insts: dict,
             "dn":        dn,
             "stocks":    sorted(stocks, key=lambda x: x["chg"], reverse=True),
         })
-
     return stats
 
 def build_treemap_html(stocks, title):
@@ -1483,7 +1512,6 @@ def tab_scanner():
         hard_risk = full_del | delist | st.session_state.gemini_delisting
         # ── 官方產業分類（24 小時快取，幾乎不消耗時間）────────
         token = st.session_state.get("token", "")
-        sector_mapping = fetch_official_sectors(token)
     gkey=st.session_state.gemini_key
     if gkey:
         with st.spinner("🤖 偵測下市風險股..."):
@@ -1494,13 +1522,9 @@ def tab_scanner():
     inst_date=get_institution_query_date_str() if False else (now_tw.date()-timedelta(days=1) if now_tw.hour<17 else now_tw.date())
     time_note="（昨日盤後）" if now_tw.hour<17 else "（今日盤後）"
     inst_note=f"法人：{len(insts)} 檔" if insts else "法人：今日未取得"
-    sec_note = f"產業：{len(sector_mapping)} 種官方分類" if sector_mapping else "產業分類：載入中"
-    st.caption(f"股價：{len(prices)} 檔 | {inst_note} | {sec_note} | {time_note}")
+    st.caption(f"股價：{len(prices)} 檔 | {inst_note} | {time_note}")
     if not prices: st.error("⚠️ 無法取得股價數據"); return
-    if not sector_mapping:
-        st.warning("⚠️ 無法取得產業分類資料，請確認網路或 FinMind Token 設定，稍後再試。")
-
-    stats = compute_sector_stats(prices, insts, hard_risk, sector_mapping)
+    stats = compute_sector_stats(prices, insts, hard_risk)
     if not st.session_state.get("scanner_sector"):
         # ── 第一層：強勢/弱勢概覽 ─────────────────────────────
         sorted_desc=sorted(stats,key=lambda x:x["avg_chg"],reverse=True)
