@@ -1589,7 +1589,7 @@ def tab_analysis():
                 if idx is not None: st.session_state.results[idx]=new_r
                 save_results_cache(st.session_state.results); st.success("✅ 已更新"); st.rerun()
             else: st.error(f"❌ {err}")
-    st.iframe(src=f"data:text/html;charset=utf-8,{requests.utils.quote(html)}", height=2700)
+    st.iframe(src=f"data:text/html;charset=utf-8,{requests.utils.quote(html)}", height=800)
 
 def tab_calendar():
     st.markdown("### 📅 財經行事曆")
