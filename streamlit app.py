@@ -592,7 +592,8 @@ body{background:#1a2332;color:#e8eaf0;font-family:'Helvetica Neue',Arial,sans-se
 # ── 官方產業分類快取 ──────────────────────────────────────────
 @st.cache_data(ttl=86400)
 def fetch_official_sectors(token: str = "") -> dict:
-    mapping = {"2330": "半導體"}
+    mapping = {}
+    mapping["2330"] = clean_name("半導體")
     fallback_map = {
         "2330": "半導體", "2303": "半導體", "2454": "半導體", "5347": "半導體", "3711": "半導體",
         "2317": "電腦及週邊設備", "2382": "電腦及週邊設備", "3231": "電腦及週邊設備", "2356": "電腦及週邊設備", 
@@ -602,7 +603,7 @@ def fetch_official_sectors(token: str = "") -> dict:
         "2881": "金融保險", "2891": "金融保險",
         "3105": "半導體", "6770": "半導體"
     }
-    mapping.update({"2330": "半導體"})
+    mapping.update(fallback_map)
     def clean_name(name):
         return name.replace("工業", "").replace("業", "") if len(name) > 2 else name
 
