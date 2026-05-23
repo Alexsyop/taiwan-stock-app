@@ -1247,93 +1247,201 @@ def compute_sector_stats(prices: dict, insts: dict,
     return stats
 
 def build_treemap_html(stocks, title):
-    if not stocks: return "<body style='background:#1a2332;color:#e8eaf0;padding:20px'>無數據</body>"
-    def chg_color(c):
-        if c>=9: return "#8b0000"
-        elif c>=6: return "#c0392b"
-        elif c>=3: return "#e74c3c"
-        elif c>=1: return "#ff6b6b"
-        elif c>0: return "#ff9999"
-        elif c==0: return "#2d3436"
-        elif c>-1: return "#aaffaa"
-        elif c>-3: return "#55efc4"
-        elif c>-6: return "#27ae60"
-        elif c>-9: return "#1e8449"
-        else: return "#145a32"
-    js_data=json.dumps([{"name":s.get("name",s.get("code","")),"code":s.get("code",""),
-                          "price":s.get("price",0),"chg":round(s.get("chg",0),2),
-                          "vol":max(s.get("vol",1),1),"color":chg_color(s.get("chg",0))}
-                         for s in stocks],ensure_ascii=False)
-    return f"""<!DOCTYPE html><html><head><meta charset="UTF-8">
-<style>*{{box-sizing:border-box;margin:0;padding:0}}body{{background:#1a2332;font-family:Arial}}
-#ti{{color:#e8eaf0;font-size:13px;font-weight:700;padding:8px 12px}}
-#tm{{position:relative;width:100%;height:450px;overflow:hidden}}
-.c{{position:absolute;display:flex;flex-direction:column;align-items:center;justify-content:center;
-    border:1px solid #1a2332;border-radius:3px;overflow:hidden;cursor:default}}
-.c:hover{{opacity:.85;z-index:10}}
-.c .n{{font-size:12px;font-weight:700;color:#fff;text-shadow:1px 1px 2px rgba(0,0,0,.9);
-       white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:95%}}
-.c .p{{font-size:11px;color:#fff;text-shadow:1px 1px 2px rgba(0,0,0,.9)}}
-.lg{{display:flex;flex-direction:column;align-items:center;padding:6px 0}}
-.lb{{width:280px;height:12px;border-radius:6px;
-     background:linear-gradient(90deg,#145a32,#27ae60,#2d3436,#e74c3c,#8b0000)}}
-.ll{{display:flex;justify-content:space-between;width:280px;font-size:10px;color:#8fa3b8;margin-top:2px}}</style>
-</head><body>
-<div id="ti">🌡️ {title}（方塊大小=成交量，🔴漲🟢跌）</div>
-<div id="tm"></div>
-<div class="lg"><div class="lb"></div><div class="ll"><span>-10%+</span><span>-5%</span><span>平盤</span><span>+5%</span><span>+10%+</span></div></div>
-<script>
-const D={js_data};
-const ct=document.getElementById('tm');
-function layout(items,x,y,w,h){{
-  const total=items.reduce((s,d)=>s+d.vol,0)||1;
-  const cells=[]; let row=[],rv=0,cx=x,cy=y,rw=w,rh=h;
-  function place(row,rv,px,py,pw,ph){{
-    const short=Math.min(pw,ph),side=rv/total*(pw*ph)/short;
-    let ox=px,oy=py;
-    for(const r of row){{
-      const f=r.vol/rv;
-      if(pw<=ph){{cells.push({{...r,x:ox,y:oy,w:side,h:f*short}});oy+=f*short;}}
-      else{{cells.push({{...r,x:ox,y:oy,w:f*side,h:short}});ox+=f*side;}}
-    }}
-    return side;
-  }}
-  for(let i=0;i<items.length;i++){{
-    const d=items[i];
-    if(!row.length){{row.push(d);rv+=d.vol;}}
-    else{{
-      const tv=rv+d.vol,short=Math.min(rw,rh);
-      const side=tv/total*(rw*rh)/short;
-      const testAsp=Math.max(...[...row,d].map(r=>{{const f=r.vol/tv;const rl=f*(rw<=rh?rh:rw)*short/side;return Math.max(side/rl,rl/side);}}));
-      const currAsp=Math.max(...row.map(r=>{{const f=r.vol/rv;const sl=rv/total*(rw*rh)/short;const rl=f*(rw<=rh?rh:rw)*short/sl;return Math.max(sl/rl,rl/sl);}}));
-      if(testAsp<=currAsp){{row.push(d);rv+=d.vol;}}
-      else{{
-        const s=place(row,rv,cx,cy,rw,rh);
-        if(rw<=rh){{cy+=s;rh-=s;}}else{{cx+=s;rw-=s;}}
-        row=[d];rv=d.vol;
-      }}
-    }}
-    if(i===items.length-1&&row.length)place(row,rv,cx,cy,rw,rh);
-  }}
-  return cells;
-}}
-function render(){{
-  const W=ct.offsetWidth||800,H=450;
-  const sorted=[...D].sort((a,b)=>b.vol-a.vol);
-  const cells=layout(sorted,0,0,W,H);
-  ct.innerHTML='';
-  cells.forEach(c=>{{
-    const div=document.createElement('div');
-    div.className='c';
-    div.style.cssText=`left:${{Math.round(c.x+1)}}px;top:${{Math.round(c.y+1)}}px;width:${{Math.max(Math.round(c.w-2),2)}}px;height:${{Math.max(Math.round(c.h-2),2)}}px;background:${{c.color}}`;
-    div.title=c.name+' '+c.code+'\\n'+c.price+'元 '+(c.chg>=0?'+':'')+c.chg+'%';
-    const sign=c.chg>=0?'+':'';
-    if(c.w>50&&c.h>35)div.innerHTML=(c.w>70&&c.h>50?`<div class="n">${{c.name}}</div>`:'')+`<div class="p">${{sign}}${{c.chg.toFixed(1)}}%</div>`;
-    ct.appendChild(div);
-  }});
-}}
-render();window.addEventListener('resize',render);
-</script></body></html>"""
+    """
+    專業熱力圖：Squarify 演算法 + Top20/其他合併 + 成交值/量切換。
+    台股慣例：🔴漲 🟢跌。只動此函式，其他程式碼不變。
+    """
+    if not stocks:
+        return "<body style='background:#1a2332;color:#e8eaf0;padding:20px'>無數據</body>"
+
+    js_data = json.dumps([{
+        "name":  s.get("name", s.get("code", "")),
+        "code":  s.get("code", ""),
+        "price": s.get("price", 0),
+        "chg":   round(s.get("chg", 0), 2),
+        "vol":   max(s.get("vol", 1), 1),
+    } for s in stocks], ensure_ascii=False)
+
+    title_esc = title.replace('"', '&quot;')
+
+    CSS = (
+        "*{box-sizing:border-box;margin:0;padding:0}"
+        "body{background:#1a2332;font-family:'Helvetica Neue',Arial,sans-serif}"
+        "#hdr{display:flex;align-items:center;gap:8px;padding:8px 12px;"
+        "     flex-wrap:wrap;border-bottom:1px solid #2c3e50}"
+        "#ti{color:#e8eaf0;font-size:13px;font-weight:700;flex-shrink:0}"
+        ".tb{background:#2c3e50;border:1px solid #3d5166;color:#8fa3b8;"
+        "    padding:3px 13px;border-radius:99px;cursor:pointer;font-size:12px;transition:all .15s}"
+        ".tb.on{background:#27ae60;border-color:#27ae60;color:#fff;font-weight:600}"
+        "#hint{font-size:11px;color:#8fa3b8;margin-left:auto}"
+        "#tm{position:relative;width:100%;height:450px;overflow:hidden;background:#1a2332}"
+        ".c{position:absolute;display:flex;flex-direction:column;align-items:center;"
+        "   justify-content:center;border:1px solid #1a2332;border-radius:3px;"
+        "   overflow:hidden;cursor:default;transition:opacity .12s}"
+        ".c:hover{opacity:.82;z-index:10}"
+        ".c .cn{font-size:12px;font-weight:700;color:#fff;"
+        "       text-shadow:1px 1px 2px rgba(0,0,0,.9);"
+        "       white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:94%}"
+        ".c .cp{font-size:11px;color:#fff;text-shadow:1px 1px 2px rgba(0,0,0,.9)}"
+        ".c .cx{font-size:10px;color:rgba(255,255,255,.72)}"
+        ".lg{display:flex;flex-direction:column;align-items:center;padding:5px 0}"
+        ".lb{width:280px;height:10px;border-radius:6px;"
+        "    background:linear-gradient(90deg,#145a32,#27ae60,#2d3436,#e74c3c,#8b0000)}"
+        ".ll{display:flex;justify-content:space-between;width:280px;"
+        "    font-size:10px;color:#8fa3b8;margin-top:2px}"
+    )
+
+    # JS 以字串拼接，避免 Python f-string 與 JS 大括號衝突
+    JS = (
+        "const RAW=" + js_data + ";\n"
+        "let MODE='amt';\n"
+        "const DATA=RAW.map(d=>Object.assign({},d,{amt:Math.round(d.price*d.vol)}));\n"
+        "\n"
+        "function getColor(c){\n"
+        "  if(c>=9)return'#8b0000';\n"
+        "  if(c>=6)return'#c0392b';\n"
+        "  if(c>=3)return'#e74c3c';\n"
+        "  if(c>=1)return'#ff6b6b';\n"
+        "  if(c>0) return'#ff9999';\n"
+        "  if(c===0)return'#2d3436';\n"
+        "  if(c>-1)return'#aaffaa';\n"
+        "  if(c>-3)return'#55efc4';\n"
+        "  if(c>-6)return'#27ae60';\n"
+        "  if(c>-9)return'#1e8449';\n"
+        "  return'#145a32';\n"
+        "}\n"
+        "\n"
+        "// ── Top20 + 其他合併 ────────────────────────────────\n"
+        "function getTop20(items,wk){\n"
+        "  const sorted=[...items].sort((a,b)=>b[wk]-a[wk]);\n"
+        "  const top=sorted.slice(0,20);\n"
+        "  const rest=sorted.slice(20);\n"
+        "  if(rest.length>0){\n"
+        "    const totalW=rest.reduce((s,d)=>s+d[wk],0)||1;\n"
+        "    const avgChg=rest.reduce((s,d)=>s+d.chg*d[wk],0)/totalW;\n"
+        "    top.push({name:'其他',code:'OTHER',price:0,chg:avgChg,\n"
+        "      vol:rest.reduce((s,d)=>s+d.vol,0),\n"
+        "      amt:rest.reduce((s,d)=>s+d.amt,0),isOther:true});\n"
+        "  }\n"
+        "  return top;\n"
+        "}\n"
+        "\n"
+        "// ── Squarify 演算法（防麵條方塊） ───────────────────\n"
+        "function worstAR(row,rowSum,shortSide){\n"
+        "  const rowLen=rowSum/shortSide;\n"
+        "  let worst=0;\n"
+        "  for(const d of row){\n"
+        "    const item=rowSum>0?(d.sw/rowSum)*shortSide:0;\n"
+        "    if(item<=0)continue;\n"
+        "    const ar=Math.max(rowLen/item,item/rowLen);\n"
+        "    if(ar>worst)worst=ar;\n"
+        "  }\n"
+        "  return worst;\n"
+        "}\n"
+        "\n"
+        "function squarify(items,x,y,w,h){\n"
+        "  const nodes=[];\n"
+        "  if(!items.length||w<1||h<1)return nodes;\n"
+        "  let rem=[...items],rx=x,ry=y,rw=w,rh=h;\n"
+        "  while(rem.length>0&&rw>0.5&&rh>0.5){\n"
+        "    const isVert=rw>=rh;\n"
+        "    const shortSide=Math.min(rw,rh);\n"
+        "    let row=[rem[0]],rowSum=rem[0].sw;\n"
+        "    for(let i=1;i<rem.length;i++){\n"
+        "      const d=rem[i];\n"
+        "      const newSum=rowSum+d.sw;\n"
+        "      const curr=worstAR(row,rowSum,shortSide);\n"
+        "      const next=worstAR([...row,d],newSum,shortSide);\n"
+        "      if(next<=curr){row.push(d);rowSum=newSum;}\n"
+        "      else break;\n"
+        "    }\n"
+        "    const rowLen=rowSum/shortSide;\n"
+        "    let off=isVert?ry:rx;\n"
+        "    for(const d of row){\n"
+        "      const frac=d.sw/rowSum;\n"
+        "      const cs=frac*shortSide;\n"
+        "      if(isVert)\n"
+        "        nodes.push(Object.assign({},d,{x:rx,y:off,w:rowLen,h:cs}));\n"
+        "      else\n"
+        "        nodes.push(Object.assign({},d,{x:off,y:ry,w:cs,h:rowLen}));\n"
+        "      off+=cs;\n"
+        "    }\n"
+        "    rem=rem.slice(row.length);\n"
+        "    if(isVert){rx+=rowLen;rw-=rowLen;}\n"
+        "    else{ry+=rowLen;rh-=rowLen;}\n"
+        "  }\n"
+        "  return nodes;\n"
+        "}\n"
+        "\n"
+        "// ── 渲染 ─────────────────────────────────────────────\n"
+        "function render(){\n"
+        "  const ct=document.getElementById('tm');\n"
+        "  const W=ct.offsetWidth||800,H=450;\n"
+        "  const top=getTop20(DATA,MODE);\n"
+        "  const totalW=top.reduce((s,d)=>s+d[MODE],0)||1;\n"
+        "  const scale=(W*H)/totalW;\n"
+        "  const scaled=top.map(d=>Object.assign({},d,{sw:d[MODE]*scale}));\n"
+        "  const cells=squarify(scaled,0,0,W,H);\n"
+        "  ct.innerHTML='';\n"
+        "  cells.forEach(function(c){\n"
+        "    if(c.w<1||c.h<1)return;\n"
+        "    const div=document.createElement('div');\n"
+        "    div.className='c';\n"
+        "    const bg=c.isOther?'#2d3436':getColor(c.chg);\n"
+        "    div.style.left=Math.round(c.x+0.5)+'px';\n"
+        "    div.style.top=Math.round(c.y+0.5)+'px';\n"
+        "    div.style.width=Math.max(Math.round(c.w-1),1)+'px';\n"
+        "    div.style.height=Math.max(Math.round(c.h-1),1)+'px';\n"
+        "    div.style.background=bg;\n"
+        "    const sign=c.chg>=0?'+':'';\n"
+        "    div.title=c.name+' '+c.code+'\\n'+c.price+'元 '+sign+c.chg.toFixed(2)+'%';\n"
+        "    if(c.w>38&&c.h>26){\n"
+        "      let inner='';\n"
+        "      if(c.w>56&&c.h>42)inner+='<div class=\"cn\">'+c.name+'</div>';\n"
+        "      inner+='<div class=\"cp\">'+sign+c.chg.toFixed(1)+'%</div>';\n"
+        "      if(c.h>58&&c.price)inner+='<div class=\"cx\">'+c.price+'元</div>';\n"
+        "      div.innerHTML=inner;\n"
+        "    }\n"
+        "    ct.appendChild(div);\n"
+        "  });\n"
+        "}\n"
+        "\n"
+        "function sw(m){\n"
+        "  MODE=m;\n"
+        "  document.getElementById('b-amt').className='tb'+(m==='amt'?' on':'');\n"
+        "  document.getElementById('b-vol').className='tb'+(m==='vol'?' on':'');\n"
+        "  document.getElementById('hint').textContent=\n"
+        "    m==='amt'?'方塊大小=成交值，\U0001f534漲\U0001f7e2跌':'方塊大小=成交量，\U0001f534漲\U0001f7e2跌';\n"
+        "  render();\n"
+        "}\n"
+        "\n"
+        "render();\n"
+        "window.addEventListener('resize',render);\n"
+    )
+
+    return (
+        "<!DOCTYPE html><html lang=\"zh-TW\"><head>"
+        "<meta charset=\"UTF-8\">"
+        "<meta name=\"viewport\" content=\"width=device-width,initial-scale=1\">"
+        "<style>" + CSS + "</style></head><body>"
+        "<div id=\"hdr\">"
+        "  <div id=\"ti\">\U0001f321\ufe0f " + title_esc + "</div>"
+        "  <button class=\"tb on\" id=\"b-amt\" onclick=\"sw('amt')\">成交值</button>"
+        "  <button class=\"tb\" id=\"b-vol\" onclick=\"sw('vol')\">成交量</button>"
+        "  <span id=\"hint\">方塊大小=成交值，\U0001f534漲\U0001f7e2跌</span>"
+        "</div>"
+        "<div id=\"tm\"></div>"
+        "<div class=\"lg\">"
+        "  <div class=\"lb\"></div>"
+        "  <div class=\"ll\">"
+        "    <span>-10%+</span><span>-5%</span><span>平盤</span>"
+        "    <span>+5%</span><span>+10%+</span>"
+        "  </div>"
+        "</div>"
+        "<script>" + JS + "</script>"
+        "</body></html>"
+    )
+
 
 def tab_scanner():
     st.markdown("### 📡 籌碼掃描 — 產業透視")
@@ -1467,7 +1575,7 @@ def tab_scanner():
                   for s in s_data["stocks"]]
             if rows:
                 rows.sort(key=lambda x:x["漲跌%"],reverse=True)
-                st.dataframe(pd.DataFrame(rows),width='stretch',hide_index=True)
+                st.dataframe(pd.DataFrame(rows),use_container_width=True,hide_index=True)
                 avg_chg2=round(sum(r["漲跌%"] for r in rows)/len(rows),2)
                 up_cnt=sum(1 for r in rows if r["漲跌%"]>0)
                 cc1,cc2,cc3=st.columns(3)
@@ -1478,7 +1586,7 @@ def tab_scanner():
         with tab_heat:
             if s_data["stocks"]:
                 heat_html=build_treemap_html(s_data["stocks"],f"{sec_name} 熱力圖")
-                st.iframe(src=f"data:text/html;charset=utf-8,{requests.utils.quote(heat_html)}", height=560)
+                components.html(heat_html,height=560,scrolling=False)
             else: st.info("此產業今日無數據")
 
 def tab_analysis():
@@ -1589,7 +1697,7 @@ def tab_analysis():
                 if idx is not None: st.session_state.results[idx]=new_r
                 save_results_cache(st.session_state.results); st.success("✅ 已更新"); st.rerun()
             else: st.error(f"❌ {err}")
-    st.iframe(src=f"data:text/html;charset=utf-8,{requests.utils.quote(html)}", height=2700)
+    components.html(html,height=2700,scrolling=True)
 
 def tab_calendar():
     st.markdown("### 📅 財經行事曆")
@@ -1639,7 +1747,7 @@ def tab_calendar():
     co3.metric("🔴 利空",bear_cnt); co4.metric("⚪ 中性",len(events)-bull_cnt-bear_cnt)
     try:
         cal_html=build_calendar_html(events,st.session_state.cal_year,st.session_state.cal_month)
-        st.iframe(src=f"data:text/html;charset=utf-8,{requests.utils.quote(cal_html)}", height=1250)
+        components.html(cal_html,height=1250,scrolling=True)
     except Exception as e:
         st.error(f"月曆渲染失敗：{e}")
         pfx=f"{st.session_state.cal_year}-{st.session_state.cal_month:02d}"
@@ -1657,7 +1765,7 @@ def tab_rank():
                       "目標":f"{r['tp']:,.0f}" if r.get("tp") else "-",
                       "風控":("🚨全額交割" if r.get("is_full_del") else "⚠️下市" if r.get("is_delisting") else "⏱處置" if r.get("is_disposed") else "正常")}
                      for r in results])
-    st.dataframe(df,width='stretch',hide_index=True)
+    st.dataframe(df,use_container_width=True,hide_index=True)
     buy2=[r for r in results if r["fc"]>0 and r["tc"]>0 and not r.get("is_hard_risk",False)]
     if buy2:
         st.markdown("### ✅ 外資+投信同向買超")
