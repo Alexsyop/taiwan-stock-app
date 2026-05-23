@@ -1219,7 +1219,8 @@ def compute_sector_stats(prices: dict, insts: dict,
             continue
         if not p or p.get("price", 0) <= 0:
             continue
-        sector = sector_mapping.get(code, "") or "其他"
+        clean_code = str(code).split('.')[0].strip()
+        sector = sector_mapping.get(clean_code, "") or "其他"
         inst = insts.get(code, {})
         bucket[sector].append({
             "code":  code,
