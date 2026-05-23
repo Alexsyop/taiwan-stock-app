@@ -621,6 +621,8 @@ def fetch_official_sectors(token: str = "") -> dict:
                     code = str(item.get("stock_id", "")).strip()
                     ind  = str(item.get("industry_category", "")).strip()
                     if code and ind and ind not in ("None", ""):
+                        ind = str(ind)
+                        code = str(code)
                         mapping[code] = clean_name(ind)
         except Exception:
             pass
@@ -638,6 +640,8 @@ def fetch_official_sectors(token: str = "") -> dict:
                 code = str(item.get("公司代號", "")).strip()
                 ind  = str(item.get("產業類別", "")).strip()
                 if code and ind:
+                    ind = str(ind)
+                    code = str(code)
                     mapping[code] = clean_name(ind)
     except Exception:
         pass
@@ -652,6 +656,8 @@ def fetch_official_sectors(token: str = "") -> dict:
                 code = str(item.get("SecuritiesCompanyCode", "")).strip()
                 ind  = str(item.get("Industry", "")).strip()
                 if code and ind:
+                    ind = str(ind)
+                    code = str(code)
                     mapping[code] = clean_name(ind)
     except Exception:
         pass
