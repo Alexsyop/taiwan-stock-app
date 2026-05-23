@@ -61,24 +61,6 @@ ALL_STOCKS = {
 
 _MARKET_NAMES: dict = {}
 
-SECTOR_MAP = {
-    "⚡ 半導體/晶圓": {"desc":"晶圓代工、半導體製造","stocks":["2330","2303","5347","6770","3105","2344","2408","6770","8299","6488","5483"]},
-    "🔧 IC設計": {"desc":"IC設計、SoC、類比","stocks":["2454","3034","3035","3443","3529","3661","5274","4966","4919","4968","3081","3592","6526","6533","6415","8016","6138","8054","6643"]},
-    "🖥️ AI伺服器/代工": {"desc":"AI伺服器、雲端ODM、EMS","stocks":["6669","2382","2356","3231","4938","2357","2353","2317","2324","2301","3706"]},
-    "❄️ 散熱/機殼": {"desc":"水冷散熱模組、伺服器機殼","stocks":["3017","2059","1513","3376","3324","3483","6806","2421","8996","8210","6230"]},
-    "🌐 網通/矽光子": {"desc":"光通訊、交換器、網通設備","stocks":["6285","3706","3596","2345","3047","4979","3163","3234","3363","4908","6442","3450"]},
-    "⚙️ 重電/電線電纜": {"desc":"發電、輸配電、綠能工程","stocks":["1519","1513","1514","1503","1605","1609","1608","1504","1515","6806"]},
-    "📋 ABF/PCB載板": {"desc":"ABF載板、高階PCB、銅箔基板","stocks":["3037","2368","8046","4958","3044","2313","6153","2383","6269","6274","8358"]},
-    "🤖 機器人/自動化": {"desc":"工業機器人、自動化設備","stocks":["2359","1590","2049","4540","8374","4526","4532","6640","2464"]},
-    "📦 晶圓封測": {"desc":"半導體後段封裝、測試","stocks":["3711","2449","6239","2441","8150","6230","6510","6515","3264","3374","6147"]},
-    "🍎 光學/蘋概": {"desc":"手機鏡頭、光學元件、蘋果供應鏈","stocks":["3008","3406","3362","3019","3504","6209","2439"]},
-    "🔌 電源/被動元件": {"desc":"電源供應器、MLCC、電容電阻","stocks":["2308","6208","3537","3665","2327","2492","2456","3026","6173"]},
-    "🏦 金融保險": {"desc":"銀行、壽險、金控","stocks":["2880","2881","2882","2883","2884","2885","2886","2887","2890","2891","2892","5880","2834","2809"]},
-    "🚢 航運/航空": {"desc":"貨櫃散裝航運、航空客貨運","stocks":["2603","2609","2615","2606","2607","2610","2618","2637","2605","2614"]},
-    "🏗️ 營建/資產": {"desc":"房地產開發、營造工程","stocks":["2504","2520","2542","2548","5522","2534","2501","2535"]},
-    "💉 生技醫療": {"desc":"新藥研發、醫療器材、保健","stocks":["6446","4743","1795","6472","1760","4128","4162","6547","1701"]}
-}
-
 FINMIND_API = "https://api.finmindtrade.com/api/v4/data"
 GEMINI_MODEL = "gemini-2.0-flash"
 HDR = {"User-Agent":"Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"}
@@ -149,7 +131,6 @@ def con_days(series):
     return c*d
 
 @st.cache_data(ttl=86400)          # 每日更新一次
-@st.cache_data(ttl=86400)
 def fetch_all_stock_names(token: str = "") -> dict:
     """
     全市場股票名稱字典（上市 + 上櫃 + 興櫃），快取 24 小時。
@@ -607,6 +588,48 @@ body{background:#1a2332;color:#e8eaf0;font-family:'Helvetica Neue',Arial,sans-se
             "</div></body></html>")
 
 # ── 風控 API ─────────────────────────────────────────────────
+
+# ── 官方產業分類快取 ──────────────────────────────────────────
+@st.cache_data(ttl=86400)
+def fetch_official_sectors() -> dict:
+    """
+    回傳 { "股號": "官方產業名稱" }，涵蓋上市與上櫃。
+    快取 24 小時（產業分類極少異動）。
+    上市來源：TWSE t187ap03_L（欄位：公司代號、產業類別）
+    上櫃來源：TPEx tpex_listed_companies（欄位：SecuritiesCompanyCode、Industry）
+    """
+    mapping: dict = {}
+
+    # ── 上市（TWSE）────────────────────────────────────────────
+    try:
+        r = requests.get(
+            "https://openapi.twse.com.tw/v1/opendata/t187ap03_L",
+            headers=HDR, timeout=25, verify=False)
+        if r.status_code == 200:
+            for item in r.json():
+                code = str(item.get("公司代號","")).strip()
+                ind  = str(item.get("產業類別","")).strip()
+                if code and ind:
+                    mapping[code] = ind
+    except Exception:
+        pass
+
+    # ── 上櫃（TPEx）────────────────────────────────────────────
+    try:
+        r = requests.get(
+            "https://www.tpex.org.tw/openapi/v1/tpex_listed_companies",
+            headers=HDR, timeout=25, verify=False)
+        if r.status_code == 200:
+            for item in r.json():
+                code = str(item.get("SecuritiesCompanyCode","")).strip()
+                ind  = str(item.get("Industry","")).strip()
+                if code and ind:
+                    mapping[code] = ind
+    except Exception:
+        pass
+
+    return mapping
+
 @st.cache_data(ttl=3600)
 def fetch_disposed_cached():
     disposed = set()
@@ -1151,28 +1174,59 @@ def build_full_html(results):
             f'{nav}</div>{cards}</div></body></html>')
 
 # ── 籌碼掃描：産業分析 ────────────────────────────────────────
-def compute_sector_stats(prices, insts, hard_risk):
-    total_vol=sum(p.get("volume",0) or 0 for p in prices.values()) or 1
-    stats=[]
-    for sec_name,info in SECTOR_MAP.items():
-        stocks=[]
-        for code in info.get("stocks",[]):
-            if code in hard_risk: continue
-            p=prices.get(code)
-            if p and p.get("price",0)>0:
-                inst=insts.get(code,{})
-                stocks.append({"code":code,"name":nm(code),"price":p["price"],
-                                "chg":p.get("chg_pct",0) or 0,"vol":p.get("volume",0) or 0,
-                                "f":inst.get("f",0) or 0,"t":inst.get("t",0) or 0})
-        if not stocks: continue
-        total_v=sum(s["vol"] for s in stocks)
-        avg_chg=round(sum(s["chg"] for s in stocks)/len(stocks),2)
-        net_inst=sum(s["f"]+s["t"] for s in stocks)
-        up=sum(1 for s in stocks if s["chg"]>0); dn=sum(1 for s in stocks if s["chg"]<0)
-        stats.append({"name":sec_name,"desc":info.get("desc",""),"count":len(stocks),
-                       "avg_chg":avg_chg,"total_vol":total_v,"weight":round(total_v/total_vol*100,2),
-                       "net_inst":net_inst,"up":up,"dn":dn,
-                       "stocks":sorted(stocks,key=lambda x:x["chg"],reverse=True)})
+def compute_sector_stats(prices: dict, insts: dict,
+                          hard_risk: set, sector_mapping: dict) -> list:
+    """
+    依官方產業分類動態分群，統計各產業漲跌、成交量、法人買賣。
+    sector_mapping：{ "股號": "官方產業名稱" }（from fetch_official_sectors()）
+    查無分類的股票一律歸入「其他」，確保全市場覆蓋。
+    """
+    from collections import defaultdict as _dd
+
+    total_vol = sum(p.get("volume", 0) or 0 for p in prices.values()) or 1
+    bucket: dict = _dd(list)
+
+    # ── 動態分群：遍歷所有有報價的股票 ───────────────────────
+    for code, p in prices.items():
+        if code in hard_risk:
+            continue
+        if not p or p.get("price", 0) <= 0:
+            continue
+        sector = sector_mapping.get(code, "") or "其他"
+        inst = insts.get(code, {})
+        bucket[sector].append({
+            "code":  code,
+            "name":  nm(code),
+            "price": p["price"],
+            "chg":   p.get("chg_pct", 0) or 0,
+            "vol":   p.get("volume",  0) or 0,
+            "f":     inst.get("f", 0) or 0,
+            "t":     inst.get("t", 0) or 0,
+        })
+
+    # ── 彙整統計 ─────────────────────────────────────────────
+    stats = []
+    for sec_name, stocks in bucket.items():
+        if not stocks:
+            continue
+        total_v  = sum(s["vol"] for s in stocks)
+        avg_chg  = round(sum(s["chg"] for s in stocks) / len(stocks), 2)
+        net_inst = sum(s["f"] + s["t"] for s in stocks)
+        up  = sum(1 for s in stocks if s["chg"] > 0)
+        dn  = sum(1 for s in stocks if s["chg"] < 0)
+        stats.append({
+            "name":      sec_name,
+            "desc":      f"{len(stocks)} 支成份股",
+            "count":     len(stocks),
+            "avg_chg":   avg_chg,
+            "total_vol": total_v,
+            "weight":    round(total_v / total_vol * 100, 2),
+            "net_inst":  net_inst,
+            "up":        up,
+            "dn":        dn,
+            "stocks":    sorted(stocks, key=lambda x: x["chg"], reverse=True),
+        })
+
     return stats
 
 def build_treemap_html(stocks, title):
@@ -1269,9 +1323,10 @@ def tab_scanner():
     c_r,c_b=st.columns([3,1])
     with c_r:
         if st.button("🔄 重新整理全市場數據",use_container_width=True,key="scn_refresh"):
-            for fn in [fetch_twse_prices_all,fetch_twse_institution_all,
-                       fetch_tpex_prices_all,fetch_tpex_institution_all,
-                       fetch_disposed_cached,fetch_full_delivery_cached,fetch_delisting_cached]:
+            for fn in [fetch_twse_prices_all, fetch_twse_institution_all,
+                       fetch_tpex_prices_all,  fetch_tpex_institution_all,
+                       fetch_disposed_cached,  fetch_full_delivery_cached,
+                       fetch_delisting_cached, fetch_official_sectors]:
                 fn.clear()
             st.session_state.gemini_delisting=set(); st.session_state.gemini_delisting_ts=None
             st.session_state.scanner_sector=None; st.rerun()
@@ -1280,14 +1335,20 @@ def tab_scanner():
             if st.button("⬅ 返回列表",use_container_width=True,key="scn_back"):
                 st.session_state.scanner_sector=None; st.rerun()
     qdate=get_inst_date_str()
-    with st.spinner("📡 取得全市場數據..."):
-        twse_p=fetch_twse_prices_all(); tpex_p=fetch_tpex_prices_all()
-        prices={**twse_p,**tpex_p}; update_market_names(prices)
-        twse_i=fetch_twse_institution_all(qdate); tpex_i=fetch_tpex_institution_all(qdate)
-        insts={**twse_i,**tpex_i}
-        disposed=fetch_disposed_cached(); full_del=fetch_full_delivery_cached()
-        delist=fetch_delisting_cached()
-        hard_risk=full_del|delist|st.session_state.gemini_delisting
+    with st.spinner("📡 取得全市場數據 + 官方產業分類..."):
+        twse_p = fetch_twse_prices_all()
+        tpex_p = fetch_tpex_prices_all()
+        prices = {**twse_p, **tpex_p}
+        update_market_names(prices)
+        twse_i = fetch_twse_institution_all(qdate)
+        tpex_i = fetch_tpex_institution_all(qdate)
+        insts  = {**twse_i, **tpex_i}
+        disposed  = fetch_disposed_cached()
+        full_del  = fetch_full_delivery_cached()
+        delist    = fetch_delisting_cached()
+        hard_risk = full_del | delist | st.session_state.gemini_delisting
+        # ── 官方產業分類（24 小時快取，幾乎不消耗時間）────────
+        sector_mapping = fetch_official_sectors()
     gkey=st.session_state.gemini_key
     if gkey:
         with st.spinner("🤖 偵測下市風險股..."):
@@ -1298,9 +1359,10 @@ def tab_scanner():
     inst_date=get_institution_query_date_str() if False else (now_tw.date()-timedelta(days=1) if now_tw.hour<17 else now_tw.date())
     time_note="（昨日盤後）" if now_tw.hour<17 else "（今日盤後）"
     inst_note=f"法人：{len(insts)} 檔" if insts else "法人：今日未取得"
-    st.caption(f"股價：{len(prices)} 檔 | {inst_note} | {time_note}")
+    sec_note = f"產業：{len(sector_mapping)} 種官方分類" if sector_mapping else "產業分類：載入中"
+    st.caption(f"股價：{len(prices)} 檔 | {inst_note} | {sec_note} | {time_note}")
     if not prices: st.error("⚠️ 無法取得股價數據"); return
-    stats=compute_sector_stats(prices,insts,hard_risk)
+    stats = compute_sector_stats(prices, insts, hard_risk, sector_mapping)
     if not st.session_state.get("scanner_sector"):
         # ── 第一層：強勢/弱勢概覽 ─────────────────────────────
         sorted_desc=sorted(stats,key=lambda x:x["avg_chg"],reverse=True)
