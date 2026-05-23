@@ -1306,11 +1306,17 @@ def build_full_html(results):
 def compute_sector_stats(prices, insts, hard_risk, sector_mapping):
     """
     依 sector_mapping 動態分群，回傳各產業統計列表。
+    - 代號清洗：去除 .TW / .TWO 後綴與空格，統一為 4 碼數字格式。
     - 查無分類的股票歸入「其他」。
     - price / vol 為 None 或 <= 0 者直接跳過，確保前端資料乾淨。
     """
     from collections import defaultdict
-    total_vol    = sum((p.get("volume") or 0) for p in prices.values()) or 1
+
+    def normalize_code(c):
+        """2330.TW → 2330 ／ 2330.TWO → 2330 ／ 2330 → 2330"""
+        return str(c).strip().split(".")[0]
+
+    total_vol     = sum((p.get("volume") or 0) for p in prices.values()) or 1
     sector_groups: dict = defaultdict(list)
 
     for code, p in prices.items():
@@ -1321,12 +1327,13 @@ def compute_sector_stats(prices, insts, hard_risk, sector_mapping):
             continue
         price = p.get("price") or 0
         vol   = p.get("volume") or 0
-        if price <= 0 or vol <= 0:          # 過濾掉無效報價，防止 JS 渲染崩潰
+        if price <= 0 or vol <= 0:      # 過濾無效報價，防止 JS 渲染崩潰
             continue
-        # ── 產業分類 ──────────────────────────────────────────
-        sec_name = sector_mapping.get(code, "其他")
-        inst     = insts.get(code, {})
-        chg      = p.get("chg_pct") or 0
+        # ── 代號清洗後對照產業分類 ───────────────────────────
+        norm_code = normalize_code(code)
+        sec_name  = sector_mapping.get(norm_code, "其他")
+        inst      = insts.get(code, {})
+        chg       = p.get("chg_pct") or 0
         sector_groups[sec_name].append({
             "code":  code,
             "name":  nm(code),
@@ -1731,7 +1738,7 @@ def tab_scanner():
         with tab_heat:
             if s_data["stocks"]:
                 heat_html=build_treemap_html(s_data["stocks"],f"{sec_name} 熱力圖")
-                st.iframe(heat_html,height=560)
+                st.iframe(heat_html,height=560,scrolling=False)
             else: st.info("此產業今日無數據")
 
 def tab_analysis():
