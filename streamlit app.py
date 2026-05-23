@@ -1738,7 +1738,7 @@ def tab_scanner():
         with tab_heat:
             if s_data["stocks"]:
                 heat_html=build_treemap_html(s_data["stocks"],f"{sec_name} 熱力圖")
-                st.iframe(heat_html,height=560,scrolling=False)
+                st.iframe(heat_html,height=560)
             else: st.info("此產業今日無數據")
 
 def tab_analysis():
