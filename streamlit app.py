@@ -593,7 +593,6 @@ body{background:#1a2332;color:#e8eaf0;font-family:'Helvetica Neue',Arial,sans-se
 @st.cache_data(ttl=86400)
 def fetch_official_sectors(token: str = "") -> dict:
     mapping = {}
-    mapping["2330"] = clean_name("半導體")
     fallback_map = {
         "2330": "半導體", "2303": "半導體", "2454": "半導體", "5347": "半導體", "3711": "半導體",
         "2317": "電腦及週邊設備", "2382": "電腦及週邊設備", "3231": "電腦及週邊設備", "2356": "電腦及週邊設備", 
