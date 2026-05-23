@@ -1144,147 +1144,6 @@ def analyze(sid,token,disposed,full_delivery,delisting,gemini_del,force=False):
 # ─────────────────────────────────────────────────────────────
 # 全市場掃描
 # ─────────────────────────────────────────────────────────────
-def compute_sector_analysis(insts, prices, hard_risk, disposed):
-    """按產業彙整法人買賣超，回傳產業排行。"""
-    sector_results = []
-    for sector_name, sector_info in SECTOR_MAP.items():
-        buying = []; total_f = 0; total_t = 0
-        for sid in sector_info["stocks"]:
-            if sid in hard_risk: continue
-            inst = insts.get(sid); pdata = prices.get(sid)
-            if not inst or not pdata: continue
-            f=inst.get("f",0); t=inst.get("t",0)
-            vol=pdata.get("volume",0) or 1; price=pdata.get("price",0)
-            chg=pdata.get("chg_pct",0) or 0
-            total_f+=f; total_t+=t
-            buying.append({"sid":sid,"name":nm(sid),"f":f,"t":t,"price":price,
-                           "chg":chg,"vol":vol,"ab":round((f+t)/vol*100,1) if vol>0 else 0,
-                           "tag":"⏱" if sid in disposed else ""})
-        buying.sort(key=lambda x:x["ab"],reverse=True)
-        total=total_f+total_t
-        if total!=0 or buying:
-            sector_results.append({
-                "name": sector_name,
-                "short": sector_name.split(" ",1)[1] if " " in sector_name else sector_name,
-                "desc": sector_info["desc"],
-                "total_f": total_f, "total_t": total_t, "total": total,
-                "stocks": buying,
-                "active": sum(1 for s in buying if s["f"]>0 or s["t"]>0),
-            })
-    sector_results.sort(key=lambda x:x["total"],reverse=True)
-    return sector_results
-
-
-def run_scanner():
-    _qdate = get_institution_query_date_str()
-    twse_p=fetch_twse_prices_all(); twse_i=fetch_twse_institution_all(_qdate)
-    tpex_p=fetch_tpex_prices_all(); tpex_i=fetch_tpex_institution_all(_qdate)
-    # 更新動態名稱快取（補全不在 ALL_STOCKS 的股票名稱）
-    update_names_from_market({**twse_p, **tpex_p})
-    disposed=fetch_disposed_cached(); full_del=fetch_full_delivery_cached()
-    delisting=fetch_delisting_cached(); gemini_del=st.session_state.gemini_delisting
-    hard_risk=full_del|delisting|gemini_del
-    prices={**twse_p,**tpex_p}; insts={**twse_i,**tpex_i}
-    hot=[]; launch=[]
-    for sid,inst in insts.items():
-        if sid in hard_risk: continue
-        f=inst.get("f",0); t=inst.get("t",0)
-        pdata=prices.get(sid)
-        if not pdata: continue
-        vol=pdata.get("volume",0) or 1; price=pdata.get("price",0)
-        iname=pdata.get("name","") or inst.get("name",nm(sid))
-        chg=pdata.get("chg_pct",0) or 0
-        d_tag="⏱" if sid in disposed else ""
-        if f>0 and t>0:
-            ab=(f+t)/vol*100
-            if ab>=5:
-                tier="🔴極熱" if ab>=15 else "🟠熱門" if ab>=8 else "🟡升溫"
-                hot.append({"sid":sid,"name":iname,"f":f,"t":t,"vol":vol,"ab":round(ab,1),"tier":tier,"price":price,"chg":chg,"tag":d_tag})
-        if t>=500 and f>=-50:
-            val_yi=round(t*1000*price/1e8,2) if price else 0
-            if val_yi>=0.3:
-                launch.append({"sid":sid,"name":iname,"t":t,"f":f,"val_yi":val_yi,"price":price,"chg":chg,"tag":d_tag})
-    trust=[]
-    for r in st.session_state.results:
-        if r.get("is_hard_risk"): continue
-        bd=sum(1 for d in r.get("inst",[]) if d["t"]>0)
-        if bd>=4: trust.append({"sid":r["sid"],"name":r["name"],"buy_days":bd,
-                                  "t_total":sum(d["t"] for d in r.get("inst",[])),
-                                  "price":r["price"],"chg":r.get("chg",0)})
-    hot.sort(key=lambda x:x["ab"],reverse=True)
-    launch.sort(key=lambda x:(x["t"],x["val_yi"]),reverse=True)
-    trust.sort(key=lambda x:x["buy_days"],reverse=True)
-    return hot[:20],trust[:15],launch[:10],date.today().strftime("%Y/%m/%d"),len(prices),len(insts)
-
-# ─────────────────────────────────────────────────────────────
-# wiwynn HTML
-# ─────────────────────────────────────────────────────────────
-WCSS="""
-*{box-sizing:border-box;margin:0;padding:0}
-body{background:#1a2332;font-family:'Helvetica Neue',Arial,sans-serif;padding:10px 6px;color:#e8eaf0}
-.wrap{max-width:660px;margin:0 auto}
-.hdr{background:#0f1724;border-radius:14px 14px 0 0;padding:16px 18px}
-.hdr h1{font-size:18px;color:#fff;font-weight:600}
-.hdr-sub{font-size:11px;color:#8fa3b8;margin-top:3px}
-.rc{width:60px;height:60px;border-radius:50%;display:flex;flex-direction:column;align-items:center;justify-content:center;flex-shrink:0}
-.rc .lt{font-size:20px;font-weight:600;line-height:1}.rc .lb{font-size:8px;margin-top:2px}
-.tags{display:flex;flex-wrap:wrap;gap:4px;margin-top:8px}
-.tag{font-size:10px;padding:2px 7px;border-radius:99px;font-weight:500}
-.tag-g{background:#27ae6044;color:#4ecca3;border:1px solid #27ae6066}
-.tag-r{background:#e74c3c44;color:#ff8080;border:1px solid #e74c3c66}
-.tag-a{background:#f39c1244;color:#ffc107;border:1px solid #f39c1266}
-.tag-p{background:#8e44ad44;color:#c39bd3;border:1px solid #8e44ad66}
-.sbar{background:#2c3e50;border-left:4px solid #27ae60;border-radius:0 8px 8px 0;padding:10px 14px;margin-bottom:2px;display:grid;grid-template-columns:repeat(auto-fit,minmax(100px,1fr));gap:8px}
-.sc p:first-child{font-size:10px;color:#8fa3b8;text-transform:uppercase;letter-spacing:.4px;margin-bottom:2px}
-.sc p:last-child{font-size:16px;font-weight:700}
-.up{color:#4ecca3}.dn{color:#ff6b6b}.wn{color:#ffc107}
-.card{background:#2c3e50;border-radius:10px;padding:13px 15px;margin-bottom:8px;border:1px solid #3d5166}
-.ct{font-size:10px;font-weight:600;text-transform:uppercase;letter-spacing:.07em;color:#8fa3b8;margin-bottom:8px}
-.row{display:flex;justify-content:space-between;padding:5px 0;border-bottom:1px solid #3d5166;font-size:13px;gap:8px}
-.row:last-child{border-bottom:none}
-.rl{color:#8fa3b8;flex-shrink:0}.rv{font-weight:500;text-align:right;color:#e8eaf0}
-.rbar{height:9px;border-radius:5px;background:linear-gradient(90deg,#27ae60 0%,#f39c12 55%,#e74c3c 82%);position:relative;margin:9px 0 2px}
-.rn{position:absolute;top:-3px;width:3px;height:15px;background:#fff;border-radius:2px}
-.rsc{display:flex;justify-content:space-between;font-size:10px;color:#8fa3b8}
-.rfg{display:grid;grid-template-columns:1fr 1fr;gap:5px;margin-top:7px}
-.rf{background:#1a2332;border-radius:6px;padding:6px 8px;border:1px solid #3d5166}
-.rf p:first-child{font-size:10px;color:#8fa3b8;margin-bottom:1px}
-.rf p:last-child{font-size:12px;font-weight:500;color:#e8eaf0}
-.cg{display:grid;grid-template-columns:1fr 1fr 1fr;gap:6px;margin:8px 0}
-.chip{border-radius:7px;padding:8px;text-align:center;border:1px solid}
-.chip.buy{background:#1a3a27;border-color:#27ae60}.chip.sell{background:#3a1a1a;border-color:#e74c3c}
-.chip.neut{background:#2c3e50;border-color:#3d5166}
-.chip p:first-child{font-size:10px;color:#8fa3b8;margin-bottom:1px}
-.chip p:nth-child(2){font-size:14px;font-weight:600;margin-bottom:1px}
-.chip p:last-child{font-size:10px;color:#8fa3b8}
-.ev{display:flex;gap:8px;padding:7px 0;border-bottom:1px solid #3d5166;font-size:12px}
-.ev:last-child{border-bottom:none}
-.dot{width:8px;height:8px;border-radius:50%;flex-shrink:0;margin-top:3px}
-.ev strong{display:block;font-size:12px;margin-bottom:1px;color:#e8eaf0}
-.ev span{color:#8fa3b8;line-height:1.5}
-.sg{display:grid;grid-template-columns:1fr 1fr;gap:6px;margin-top:8px}
-.sb{background:#1a3a27;border-radius:7px;padding:8px 10px;font-size:11px;color:#4ecca3;border:1px solid #27ae60;line-height:1.6}
-.sr{background:#3a1a1a;border-radius:7px;padding:8px 10px;font-size:11px;color:#ff8080;border:1px solid #e74c3c;line-height:1.6}
-.st{display:flex;gap:8px;padding:6px 0;border-bottom:1px solid #3d5166;font-size:12px;align-items:flex-start;line-height:1.6;color:#e8eaf0}
-.st:last-child{border-bottom:none}.si{font-size:14px;flex-shrink:0}
-.bw{background:#3a2c0a;border-left:4px solid #ffc107;border-radius:0 6px 6px 0;padding:8px 11px;font-size:12px;color:#ffc107;margin-top:8px;line-height:1.6}
-.bd{background:#3a1a1a;border-left:4px solid #e74c3c;border-radius:0 6px 6px 0;padding:8px 11px;font-size:12px;color:#ff8080;margin-top:7px;line-height:1.6}
-.bo{background:#1a3a27;border-left:4px solid #27ae60;border-radius:0 6px 6px 0;padding:8px 11px;font-size:12px;color:#4ecca3;margin-top:7px;line-height:1.6}
-.hard-risk-banner{background:#3a0a0a;border:1px solid #e74c3c;border-radius:9px;padding:12px 15px;margin-bottom:9px}
-.hard-risk-banner strong{display:block;font-size:14px;color:#ff8080;margin-bottom:4px}
-.hard-risk-banner span{font-size:12px;color:#ffaaaa;line-height:1.6}
-.verdict{border-radius:9px;padding:11px 14px;border:1px solid}.vb{font-size:23px;font-weight:700}
-.tp-wrap{background:#1a2332;border-radius:5px;height:10px;position:relative;margin:6px 0 3px;overflow:hidden}
-.tp-fill{height:10px;border-radius:5px}
-.tp-lbl{display:flex;justify-content:space-between;font-size:10px;color:#8fa3b8}
-.inst-tbl{width:100%;border-collapse:collapse;font-size:11px;margin-top:7px}
-.inst-tbl th{background:#1a2332;color:#8fa3b8;padding:4px 6px;font-weight:600;border-bottom:1px solid #3d5166;text-align:right}
-.inst-tbl th:first-child{text-align:left}
-.inst-tbl td{padding:4px 6px;border-bottom:1px solid #3d5166;text-align:right;color:#e8eaf0}
-.inst-tbl td:first-child{text-align:left;color:#8fa3b8}
-.footer{background:#0f1724;border-radius:0 0 11px 11px;padding:10px 14px;font-size:10px;color:#8fa3b8;line-height:1.6;border-top:1px solid #3d5166}
-"""
-
 def chip_html(label,net,con_d):
     cls="buy" if net>0 else ("sell" if net<0 else "neut")
     vc="up" if net>0 else ("dn" if net<0 else "")
@@ -1558,199 +1417,557 @@ def build_full_html(results):
 # ─────────────────────────────────────────────────────────────
 # 頁面
 # ─────────────────────────────────────────────────────────────
-def _show_sector_overview(prices, insts, hard_risk, disposed):
-    """產業籌碼概況表（主視圖）"""
-    has_inst = len(insts) > 0
-    sort_opts = ["📊 今日均漲跌幅", "💰 法人合計買超"]
-    sort_key = st.radio("排序", sort_opts, horizontal=True, label_visibility="collapsed")
 
-    sector_rows = []
-    for sec_name, info in SECTOR_MAP.items():
-        sids = [s for s in info["stocks"] if s in prices and s not in hard_risk]
-        if not sids: continue
-        changes = [prices[s].get("chg_pct", 0) or 0 for s in sids]
-        avg_chg = round(sum(changes) / len(changes), 2) if changes else 0.0
-        up = sum(1 for c in changes if c > 0)
-        dn = sum(1 for c in changes if c < 0)
-        net_inst = sum(
-            (insts.get(s, {}).get("f", 0) or 0) + (insts.get(s, {}).get("t", 0) or 0)
-            for s in sids)
-        top_sid = max(sids, key=lambda s: prices[s].get("chg_pct", 0) or 0)
-        top_chg = prices[top_sid].get("chg_pct", 0) or 0
-        sector_rows.append({
-            "name": sec_name,
-            "info": info,
-            "count": len(sids),
-            "avg_chg": avg_chg,
-            "up": up,
-            "dn": dn,
-            "net_inst": net_inst,
-            "top": f"{nm(top_sid)} {top_chg:+.1f}%",
+import json as _json
+
+# ─────────────────────────────────────────────────────────────
+# 籌碼掃描輔助函式（四層架構）
+# ─────────────────────────────────────────────────────────────
+
+@st.cache_data(ttl=14400)
+def fetch_twse_industry_map():
+    """TWSE 股票→產業 對應（BWIBBU_ALL，含產業名稱）"""
+    out = {}
+    try:
+        r = requests.get(
+            "https://openapi.twse.com.tw/v1/exchangeReport/BWIBBU_ALL",
+            headers=HDR, timeout=20, verify=False)
+        if r.status_code == 200:
+            for item in r.json():
+                code = str(item.get("Code","")).strip()
+                ind  = str(item.get("Industry","")).strip()
+                if code and ind:
+                    out[code] = ind
+    except Exception:
+        pass
+    return out
+
+@st.cache_data(ttl=14400)
+def fetch_tpex_industry_map():
+    """TPEx 股票→產業 對應"""
+    out = {}
+    try:
+        r = requests.get(
+            "https://www.tpex.org.tw/openapi/v1/tpex_listed_companies",
+            headers=HDR, timeout=20, verify=False)
+        if r.status_code == 200:
+            for item in r.json():
+                code = str(item.get("SecuritiesCompanyCode","")).strip()
+                ind  = str(item.get("Industry","")).strip()
+                if code and ind:
+                    out[code] = ind
+    except Exception:
+        pass
+    return out
+
+def compute_industry_stats(ind_map, prices, insts, hard_risk):
+    """計算各產業統計：漲跌幅、成交量、法人淨買"""
+    from collections import defaultdict as _dd
+    bucket = _dd(list)
+    for code, ind in ind_map.items():
+        if code in hard_risk:
+            continue
+        p = prices.get(code)
+        if p and p.get("price", 0) > 0:
+            inst = insts.get(code, {})
+            bucket[ind].append({
+                "code":  code,
+                "name":  nm(code),
+                "price": p["price"],
+                "chg":   p.get("chg_pct", 0) or 0,
+                "vol":   p.get("volume", 0) or 0,
+                "f":     inst.get("f", 0) or 0,
+                "t":     inst.get("t", 0) or 0,
+            })
+
+    stats = []
+    total_vol_all = sum(s["vol"] for stocks in bucket.values() for s in stocks) or 1
+    for ind_name, stocks in bucket.items():
+        if not stocks:
+            continue
+        total_vol = sum(s["vol"] for s in stocks)
+        avg_chg   = round(sum(s["chg"] for s in stocks) / len(stocks), 2)
+        net_inst  = sum(s["f"] + s["t"] for s in stocks)
+        up_cnt    = sum(1 for s in stocks if s["chg"] > 0)
+        dn_cnt    = sum(1 for s in stocks if s["chg"] < 0)
+        weight_pct = round(total_vol / total_vol_all * 100, 2)
+
+        # 比重差（相對加權）：做為資金集中度指標
+        exp_weight = round(100 / max(len(bucket), 1), 2)
+        weight_diff = round(weight_pct - exp_weight, 2)
+
+        stats.append({
+            "name":       ind_name,
+            "count":      len(stocks),
+            "avg_chg":    avg_chg,
+            "total_vol":  total_vol,
+            "weight_pct": weight_pct,
+            "weight_diff": weight_diff,
+            "net_inst":   net_inst,
+            "up":         up_cnt,
+            "dn":         dn_cnt,
+            "stocks":     sorted(stocks, key=lambda x: x["chg"], reverse=True),
+        })
+    return stats
+
+
+def build_treemap_html(stocks, title="熱力圖"):
+    """產業個股熱力圖（台股慣例：紅漲綠跌）"""
+    if not stocks:
+        return "<body style='background:#1a2332;color:#e8eaf0;padding:20px'>無數據</body>"
+
+    def chg_color(chg):
+        if chg >= 9:  return "#8b0000"
+        if chg >= 6:  return "#c0392b"
+        if chg >= 3:  return "#e74c3c"
+        if chg >= 1:  return "#ff6b6b"
+        if chg > 0:   return "#ff9999"
+        if chg == 0:  return "#2d3436"
+        if chg > -1:  return "#aaffaa"
+        if chg > -3:  return "#55efc4"
+        if chg > -6:  return "#27ae60"
+        if chg > -9:  return "#1e8449"
+        return "#145a32"
+
+    js_data = []
+    for s in stocks:
+        js_data.append({
+            "name":  s.get("name", s.get("code", "")),
+            "code":  s.get("code", ""),
+            "price": s.get("price", 0),
+            "chg":   round(s.get("chg", 0), 2),
+            "vol":   max(s.get("vol", 1), 1),
+            "color": chg_color(s.get("chg", 0)),
         })
 
-    if sort_key == "📊 今日均漲跌幅":
-        sector_rows.sort(key=lambda x: x["avg_chg"], reverse=True)
-    else:
-        sector_rows.sort(key=lambda x: x["net_inst"], reverse=True)
+    data_json = _json.dumps(js_data, ensure_ascii=False)
 
-    if not has_inst:
-        st.caption("⚠️ 法人T86數據今日未取得（假日/盤後未更新），顯示今日漲跌概況")
+    return f"""<!DOCTYPE html><html lang="zh-TW"><head>
+<meta charset="UTF-8">
+<style>
+*{{box-sizing:border-box;margin:0;padding:0}}
+body{{background:#1a2332;font-family:'Helvetica Neue',Arial,sans-serif}}
+#title{{color:#e8eaf0;font-size:14px;font-weight:700;padding:8px 12px}}
+#treemap{{position:relative;width:100%;height:460px;overflow:hidden}}
+.cell{{position:absolute;display:flex;flex-direction:column;align-items:center;justify-content:center;
+        border:1px solid #1a2332;border-radius:3px;cursor:default;overflow:hidden;
+        transition:opacity .15s}}
+.cell:hover{{opacity:.85;z-index:10}}
+.cell .nm{{font-size:12px;font-weight:700;color:#fff;text-shadow:1px 1px 2px rgba(0,0,0,.9);
+           white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:95%}}
+.cell .pct{{font-size:11px;color:#fff;text-shadow:1px 1px 2px rgba(0,0,0,.9)}}
+.cell .px{{font-size:10px;color:rgba(255,255,255,.75)}}
+.legend{{display:flex;flex-direction:column;align-items:center;padding:6px 0}}
+.lg-bar{{width:280px;height:12px;border-radius:6px;
+          background:linear-gradient(90deg,#145a32,#27ae60,#2d3436,#e74c3c,#8b0000)}}
+.lg-lbl{{display:flex;justify-content:space-between;width:280px;font-size:10px;color:#8fa3b8;margin-top:2px}}
+</style></head>
+<body>
+<div id="title">🌡️ {title} — 方塊大小 = 成交量，顏色 = 漲跌幅（🔴漲 🟢跌）</div>
+<div id="treemap"></div>
+<div class="legend">
+<div class="lg-bar"></div>
+<div class="lg-lbl"><span>-10%+</span><span>-5%</span><span>平盤</span><span>+5%</span><span>+10%+</span></div>
+</div>
+<script>
+const DATA = {data_json};
+const cont = document.getElementById('treemap');
 
-    for row in sector_rows:
-        chg = row["avg_chg"]
-        chg_clr = "#27ae60" if chg >= 0 else "#e74c3c"
-        chg_sign = "+" if chg >= 0 else ""
-        inst_net = row["net_inst"]
-        inst_html = ""
-        if has_inst:
-            inst_clr = "#27ae60" if inst_net >= 0 else "#e74c3c"
-            inst_html = f'<span style="color:{inst_clr};font-size:11px">法人{inst_net:+,}張</span>'
+function layout(items, x, y, w, h) {{
+    const total = items.reduce((s,d)=>s+d.vol,0)||1;
+    const cells = [];
+    let cx=x, cy=y, rw=w, rh=h;
+    let row=[], rv=0;
 
-        c1, c2, c3, c4 = st.columns([3, 2, 2, 1])
+    function place(row, rv, px, py, pw, ph) {{
+        const short=Math.min(pw,ph);
+        const side=rv/total*(pw*ph)/short;
+        let ox=px,oy=py;
+        for(const r of row) {{
+            const f=r.vol/rv;
+            if(pw<=ph) {{
+                cells.push({{...r,x:ox,y:oy,w:side,h:f*short}});
+                oy+=f*short;
+            }} else {{
+                cells.push({{...r,x:ox,y:oy,w:f*side,h:short}});
+                ox+=f*side;
+            }}
+        }}
+        return side;
+    }}
+
+    for(let i=0;i<items.length;i++) {{
+        const d=items[i];
+        const test=[...row,d];
+        const tv=rv+d.vol;
+        const short=Math.min(rw,rh);
+        const side=tv/total*(rw*rh)/short;
+        const bestAsp=test.reduce((max,r)=>{{
+            const f=r.vol/tv;
+            const rlen=f*(rw<=rh?rh:rw)*short/side;
+            return Math.max(max,Math.max(side/rlen,rlen/side));
+        }},0);
+
+        if(!row.length||bestAsp<(row.reduce((max,r)=>{{
+            const f=r.vol/rv;
+            const sh=Math.min(rw,rh);
+            const sd=rv/total*(rw*rh)/sh;
+            const rl=f*(rw<=rh?rh:rw)*sh/sd;
+            return Math.max(max,Math.max(sd/rl,rl/sd));
+        }},0)||Infinity)) {{
+            row.push(d); rv+=d.vol;
+        }} else {{
+            const side=place(row,rv,cx,cy,rw,rh);
+            if(rw<=rh) {{ cy+=side; rh-=side; }} else {{ cx+=side; rw-=side; }}
+            row=[d]; rv=d.vol;
+        }}
+        if(i===items.length-1 && row.length) place(row,rv,cx,cy,rw,rh);
+    }}
+    return cells;
+}}
+
+function render() {{
+    const W=cont.offsetWidth||800, H=460;
+    const sorted=[...DATA].sort((a,b)=>b.vol-a.vol);
+    const cells=layout(sorted,0,0,W,H);
+    cont.innerHTML='';
+    cells.forEach(c=>{{
+        const div=document.createElement('div');
+        div.className='cell';
+        div.style.left=Math.round(c.x+1)+'px';
+        div.style.top=Math.round(c.y+1)+'px';
+        div.style.width=Math.max(Math.round(c.w-2),2)+'px';
+        div.style.height=Math.max(Math.round(c.h-2),2)+'px';
+        div.style.background=c.color;
+        div.title=c.name+' '+c.code+'\n'+c.price+'元 '+(c.chg>=0?'+':'')+c.chg+'%';
+        const sign=c.chg>=0?'+':'';
+        if(c.w>50&&c.h>35) {{
+            div.innerHTML=(c.w>70&&c.h>50?`<div class="nm">${{c.name}}</div>`:'') +
+                `<div class="pct">${{sign}}${{c.chg.toFixed(1)}}%</div>` +
+                (c.h>65?`<div class="px">${{c.price}}元</div>`:'');
+        }}
+        cont.appendChild(div);
+    }});
+}}
+render();
+window.addEventListener('resize',render);
+</script></body></html>"""
+
+
+def _scanner_layer1_2(stats, view_key):
+    """第一層 + 第二層：產業總覽 + 完整清單"""
+    if not stats:
+        st.warning("無法計算產業數據，請確認股價數據已載入")
+        return
+
+    # ── 第一層：強勢 / 弱勢 並排 ─────────────────────────────
+    st.markdown("#### 📊 今日產業透視總覽")
+    st.caption("左：強勢族群（漲幅前5）｜右：弱勢族群（跌幅前5）")
+
+    sorted_asc  = sorted(stats, key=lambda x: x["avg_chg"])
+    sorted_desc = sorted(stats, key=lambda x: x["avg_chg"], reverse=True)
+    top5 = sorted_desc[:5]
+    bot5 = sorted_asc[:5]
+
+    c_l, c_r = st.columns(2)
+    with c_l:
+        st.markdown("**🔴 強勢族群（今日漲幅）**")
+        for s in top5:
+            chg = s["avg_chg"]
+            bar_w = min(int(abs(chg) / 10 * 100), 100)
+            st.markdown(
+                f'<div style="display:flex;align-items:center;gap:8px;margin-bottom:6px">'
+                f'<span style="width:80px;font-size:12px;color:#e8eaf0;font-weight:600">{s["name"][:6]}</span>'
+                f'<div style="flex:1;background:#2c3e50;border-radius:3px;height:18px;position:relative">'
+                f'<div style="width:{bar_w}%;height:100%;background:#e74c3c;border-radius:3px"></div>'
+                f'<span style="position:absolute;right:4px;top:1px;font-size:11px;color:#fff;font-weight:700">'
+                f'+{chg:.2f}%</span></div>'
+                f'<span style="font-size:10px;color:#8fa3b8;width:40px;text-align:right">{s["weight_pct"]:.1f}%</span>'
+                f'</div>', unsafe_allow_html=True)
+    with c_r:
+        st.markdown("**🟢 弱勢族群（今日跌幅）**")
+        for s in bot5:
+            chg = s["avg_chg"]
+            bar_w = min(int(abs(chg) / 10 * 100), 100)
+            st.markdown(
+                f'<div style="display:flex;align-items:center;gap:8px;margin-bottom:6px">'
+                f'<span style="width:80px;font-size:12px;color:#e8eaf0;font-weight:600">{s["name"][:6]}</span>'
+                f'<div style="flex:1;background:#2c3e50;border-radius:3px;height:18px;position:relative">'
+                f'<div style="width:{bar_w}%;height:100%;background:#27ae60;border-radius:3px"></div>'
+                f'<span style="position:absolute;right:4px;top:1px;font-size:11px;color:#fff;font-weight:700">'
+                f'{chg:.2f}%</span></div>'
+                f'<span style="font-size:10px;color:#8fa3b8;width:40px;text-align:right">{s["weight_pct"]:.1f}%</span>'
+                f'</div>', unsafe_allow_html=True)
+
+    st.markdown("---")
+
+    # ── 第二層：完整清單 + 排序 ─────────────────────────────
+    st.markdown("#### 📋 所有產業詳細清單")
+    sort_opt = st.radio("排序方式", ["漲幅", "跌幅", "成交比重", "比重差", "法人買超"],
+                        horizontal=True, label_visibility="collapsed", key=f"sort_{view_key}")
+
+    sort_map = {
+        "漲幅":   lambda x: -x["avg_chg"],
+        "跌幅":   lambda x:  x["avg_chg"],
+        "成交比重": lambda x: -x["weight_pct"],
+        "比重差":  lambda x: -x["weight_diff"],
+        "法人買超": lambda x: -x["net_inst"],
+    }
+    sorted_stats = sorted(stats, key=sort_map[sort_opt])
+    max_chg = max(abs(s["avg_chg"]) for s in sorted_stats) or 1
+    max_wt  = max(s["weight_pct"] for s in sorted_stats) or 1
+
+    for s in sorted_stats:
+        chg = s["avg_chg"]
+        chg_c = "#e74c3c" if chg > 0 else ("#27ae60" if chg < 0 else "#8fa3b8")
+        chg_sign = "+" if chg > 0 else ""
+        bar_w_chg = int(abs(chg) / max_chg * 100)
+        bar_w_wt  = int(s["weight_pct"] / max_wt * 100)
+        inst_c = "#e74c3c" if s["net_inst"] > 0 else ("#27ae60" if s["net_inst"] < 0 else "#8fa3b8")
+        inst_sign = "+" if s["net_inst"] >= 0 else ""
+
+        c1, c2, c3 = st.columns([3, 4, 1])
         with c1:
             st.markdown(
-                f'<div style="font-size:14px;font-weight:700;color:#e8eaf0">{row["name"]}</div>'
-                f'<div style="font-size:11px;color:#8fa3b8">{row["info"]["desc"]}</div>'
-                f'<div style="font-size:11px;color:#8fa3b8">↑{row["up"]} ↓{row["dn"]} 共{row["count"]}支</div>',
+                f'<div style="font-size:13px;font-weight:700;color:#e8eaf0">{s["name"]}</div>'
+                f'<div style="font-size:10px;color:#8fa3b8">↑{s["up"]} ↓{s["dn"]} 共{s["count"]}支</div>',
                 unsafe_allow_html=True)
         with c2:
+            diff_c = "#e74c3c" if s["weight_diff"] > 0 else "#27ae60"
+            diff_sign = "+" if s["weight_diff"] >= 0 else ""
             st.markdown(
-                f'<div style="font-size:22px;font-weight:700;color:{chg_clr};padding:4px 0">'
-                f'{chg_sign}{chg:.1f}%</div>',
+                f'<div style="margin-bottom:3px">'
+                f'<span style="color:{chg_c};font-weight:700;font-size:14px">{chg_sign}{chg:.2f}%</span>'
+                f'<span style="color:#8fa3b8;font-size:10px;margin-left:8px">'
+                f'比重 {s["weight_pct"]:.1f}%（{diff_sign}{s["weight_diff"]:.1f}%）</span>'
+                f'</div>'
+                f'<div style="background:#2c3e50;border-radius:3px;height:6px;margin-bottom:2px">'
+                f'<div style="width:{bar_w_chg}%;height:6px;background:{chg_c};border-radius:3px"></div></div>'
+                f'<div style="background:#2c3e50;border-radius:3px;height:4px">'
+                f'<div style="width:{bar_w_wt}%;height:4px;background:#5d7a99;border-radius:3px"></div></div>',
                 unsafe_allow_html=True)
         with c3:
             st.markdown(
-                f'<div style="padding:8px 0;font-size:12px;color:#8fa3b8">'
-                f'🏆 {row["top"]}<br>{inst_html}</div>',
+                f'<div style="font-size:11px;color:{inst_c};text-align:right">'
+                f'{inst_sign}{s["net_inst"]:,}</div>'
+                f'<div style="font-size:9px;color:#8fa3b8;text-align:right">法人張</div>',
                 unsafe_allow_html=True)
-        with c4:
-            if st.button("查看→", key=f"sec_{row['name']}", use_container_width=True):
-                st.session_state.scanner_sector = row["name"]
+            if st.button("→", key=f"into_{view_key}_{s['name']}", help=f"查看{s['name']}個股"):
+                st.session_state.scanner_sector = s["name"]
+                st.session_state.scanner_heatmap = False
                 st.rerun()
         st.divider()
 
 
-def _show_sector_detail(sector_name, prices, insts, hard_risk, disposed):
-    """產業個股詳情（點選後展開）"""
-    info = SECTOR_MAP.get(sector_name, {})
-    c_back, c_title = st.columns([1, 5])
-    with c_back:
-        if st.button("⬅ 返回", use_container_width=True):
+def _scanner_layer3_4(sector_name, stats, prices, insts):
+    """第三層（個股清單）+ 第四層（熱力圖）"""
+    s_data = next((s for s in stats if s["name"] == sector_name), None)
+    if not s_data:
+        st.warning(f"找不到 {sector_name} 的數據")
+        return
+
+    # 返回按鈕
+    c_b, c_t = st.columns([1, 5])
+    with c_b:
+        if st.button("⬅ 返回", use_container_width=True, key="back_to_list"):
             st.session_state.scanner_sector = None
             st.rerun()
-    with c_title:
+    with c_t:
         st.markdown(f"### {sector_name}")
-        st.caption(info.get("desc", ""))
+        avg_chg = s_data["avg_chg"]
+        chg_c = "#e74c3c" if avg_chg > 0 else ("#27ae60" if avg_chg < 0 else "#8fa3b8")
+        sign = "+" if avg_chg >= 0 else ""
+        st.markdown(
+            f'<span style="color:{chg_c};font-size:18px;font-weight:700">{sign}{avg_chg:.2f}%</span>'
+            f'<span style="color:#8fa3b8;font-size:12px;margin-left:8px">'
+            f'共{s_data["count"]}支 ↑{s_data["up"]} ↓{s_data["dn"]} '
+            f'法人{s_data["net_inst"]:+,}張 比重{s_data["weight_pct"]:.1f}%</span>',
+            unsafe_allow_html=True)
 
-    sids = info.get("stocks", [])
-    rows = []
-    for sid in sids:
-        p = prices.get(sid)
-        if not p: continue
-        inst = insts.get(sid, {})
-        chg = p.get("chg_pct", 0) or 0
-        f_net = inst.get("f", 0) or 0
-        t_net = inst.get("t", 0) or 0
-        tag = "⏱" if sid in disposed else ("⚠️" if sid in hard_risk else "")
-        rows.append({
-            "⚠": tag,
-            "代號": sid,
-            "名稱": nm(sid),
-            "收盤(元)": p.get("price", 0),
-            "漲跌%": round(chg, 2),
-            "外資(張)": f_net,
-            "投信(張)": t_net,
-            "法人合計": f_net + t_net,
-        })
+    # 清單 / 熱力圖 切換
+    tab_list, tab_heat = st.tabs(["📋 清單模式", "🌡️ 熱力圖"])
 
-    if rows:
-        rows.sort(key=lambda x: x["漲跌%"], reverse=True)
-        df = pd.DataFrame(rows)
-        st.dataframe(df, use_container_width=True, hide_index=True)
-
-        avg_chg = round(sum(r["漲跌%"] for r in rows) / len(rows), 2)
-        total_inst = sum(r["法人合計"] for r in rows)
-        up_cnt = sum(1 for r in rows if r["漲跌%"] > 0)
-        cc1, cc2, cc3 = st.columns(3)
-        chg_s = "+" if avg_chg >= 0 else ""
-        cc1.metric("平均漲跌", f"{chg_s}{avg_chg:.1f}%")
-        if total_inst != 0:
-            cc2.metric("法人合計", f"{total_inst:+,}張")
+    with tab_list:
+        stocks = s_data["stocks"]
+        if stocks:
+            rows = []
+            for s in stocks:
+                chg = s["chg"]
+                rows.append({
+                    "代號": s["code"],
+                    "名稱": s["name"],
+                    "成交價": s["price"],
+                    "漲跌%": round(chg, 2),
+                    "總量(張)": s["vol"],
+                    "外資(張)": s["f"],
+                    "投信(張)": s["t"],
+                    "法人合計": s["f"] + s["t"],
+                })
+            rows.sort(key=lambda x: x["漲跌%"], reverse=True)
+            df = pd.DataFrame(rows)
+            st.dataframe(df, use_container_width=True, hide_index=True)
         else:
-            cc2.metric("法人合計", "今日未取得")
-        cc3.metric("上漲/下跌", f"{up_cnt}/{len(rows)-up_cnt}")
-    else:
-        st.info("此產業個股今日暫無數據")
+            st.info("此產業今日無數據")
+
+    with tab_heat:
+        stocks = s_data["stocks"]
+        if stocks:
+            heat_html = build_treemap_html(stocks, f"{sector_name} 熱力圖")
+            components.html(heat_html, height=560, scrolling=False)
+        else:
+            st.info("此產業今日無數據")
 
 
 def tab_scanner():
-    st.markdown("### 📡 籌碼掃描 — 全市場產業分析（免Token）")
-
-    c1, c2, c3 = st.columns(3)
-    c1.info("🆓 免費，無需 Token")
-    c2.info("📊 依產業彙整籌碼")
-    c3.info("🤖 Gemini偵測下市股")
+    """籌碼掃描 — 四層產業分析"""
+    st.markdown("### 📡 籌碼掃描 — 產業透視")
 
     # 重新整理按鈕
-    col_refresh, col_back = st.columns([3, 1])
-    with col_refresh:
-        if st.button("🔄 重新整理全市場數據", use_container_width=True):
+    col_r, col_b = st.columns([3, 1])
+    with col_r:
+        if st.button("🔄 重新整理全市場數據", use_container_width=True, key="scanner_refresh"):
             for fn in [fetch_twse_prices_all, fetch_twse_institution_all,
                        fetch_tpex_prices_all, fetch_tpex_institution_all,
+                       fetch_twse_industry_map, fetch_tpex_industry_map,
                        fetch_disposed_cached, fetch_full_delivery_cached, fetch_delisting_cached]:
                 fn.clear()
             st.session_state.gemini_delisting = set()
             st.session_state.gemini_delisting_ts = None
             st.session_state.scanner_sector = None
             st.rerun()
-    with col_back:
+    with col_b:
         if st.session_state.get("scanner_sector"):
-            if st.button("⬅ 返回產業列表", use_container_width=True):
+            if st.button("⬅ 返回列表", use_container_width=True, key="scanner_back_top"):
                 st.session_state.scanner_sector = None
                 st.rerun()
 
-    # 取得數據
+    # 取得市場數據
     _qdate = get_institution_query_date_str()
     with st.spinner("📡 取得全市場數據..."):
         twse_p = fetch_twse_prices_all()
         tpex_p = fetch_tpex_prices_all()
-        prices = {**twse_p, **tpex_p}
+        prices  = {**twse_p, **tpex_p}
         update_names_from_market(prices)
-        twse_i = fetch_twse_institution_all(_qdate)
-        tpex_i = fetch_tpex_institution_all(_qdate)
-        insts = {**twse_i, **tpex_i}
+        twse_i  = fetch_twse_institution_all(_qdate)
+        tpex_i  = fetch_tpex_institution_all(_qdate)
+        insts   = {**twse_i, **tpex_i}
         disposed = fetch_disposed_cached()
         full_del = fetch_full_delivery_cached()
-        delisting = fetch_delisting_cached()
-        hard_risk = full_del | delisting | st.session_state.gemini_delisting
+        delist   = fetch_delisting_cached()
+        hard_risk = full_del | delist | st.session_state.gemini_delisting
 
     # Gemini 下市偵測
     gkey = st.session_state.gemini_key
     if gkey:
-        with st.spinner("🤖 Gemini 偵測下市風險股票..."):
+        with st.spinner("🤖 偵測下市風險股..."):
             g_del = gemini_fetch_delisting(gkey)
         if g_del:
-            st.warning(f"🤖 Gemini 偵測到 {len(g_del)} 支下市風險股：{', '.join(sorted(g_del)[:10])}")
+            st.warning(f"🤖 Gemini 偵測到 {len(g_del)} 支下市風險股：{', '.join(sorted(g_del)[:8])}")
+        hard_risk = hard_risk | g_del
 
     # 時間說明
-    inst_query_date = get_institution_query_date()
     now_tw = datetime.utcnow() + timedelta(hours=8)
-    before5pm = now_tw.hour < 17
-    time_note = "（盤後未出，顯示昨日）" if before5pm else "（今日盤後）"
-    inst_info = f"法人：{len(insts)} 檔" if insts else "法人：今日未取得（不影響產業漲跌顯示）"
-    st.caption(f"股價：{len(prices)} 檔 | {inst_info} | {inst_query_date.strftime('%Y/%m/%d')} {time_note}")
+    inst_date = get_institution_query_date()
+    time_note = "（昨日盤後）" if now_tw.hour < 17 else "（今日盤後）"
+    inst_note = f"法人：{len(insts)} 檔" if insts else "法人：今日未取得"
+    st.caption(f"股價：{len(prices)} 檔 | {inst_note} | {inst_date.strftime('%Y/%m/%d')} {time_note}")
 
     if not prices:
         st.error("⚠️ 無法取得股價數據，請重新整理")
         return
 
-    # 顯示主視圖
-    if not st.session_state.get("scanner_sector"):
-        st.markdown("#### 📊 產業籌碼彙整（點選「查看→」可展開個股）")
-        _show_sector_overview(prices, insts, hard_risk, disposed)
-    else:
-        _show_sector_detail(st.session_state.scanner_sector, prices, insts, hard_risk, disposed)
+    # ── 三個主頁籤 ─────────────────────────────────────────────
+    t_listed, t_otc, t_custom = st.tabs(["📈 上市（TWSE官方分類）", "📊 上櫃（TPEx官方分類）", "🔍 細產業（自選分類）"])
 
+    # ── 上市（TWSE 官方產業分類）────────────────────────────────
+    with t_listed:
+        if not st.session_state.get("scanner_sector"):
+            with st.spinner("載入 TWSE 產業分類..."):
+                ind_map = fetch_twse_industry_map()
+            if ind_map:
+                stats = compute_industry_stats(ind_map, twse_p, twse_i, hard_risk)
+                _scanner_layer1_2(stats, "listed")
+            else:
+                st.warning("TWSE 產業分類數據暫無法取得，請稍後重試")
+        else:
+            with st.spinner("載入產業數據..."):
+                ind_map = fetch_twse_industry_map()
+                stats = compute_industry_stats(ind_map, twse_p, twse_i, hard_risk)
+            _scanner_layer3_4(st.session_state.scanner_sector, stats, twse_p, twse_i)
+
+    # ── 上櫃（TPEx 官方產業分類）────────────────────────────────
+    with t_otc:
+        if not st.session_state.get("scanner_sector"):
+            with st.spinner("載入 TPEx 產業分類..."):
+                tpex_ind_map = fetch_tpex_industry_map()
+            if tpex_ind_map:
+                stats_tpex = compute_industry_stats(tpex_ind_map, tpex_p, tpex_i, hard_risk)
+                _scanner_layer1_2(stats_tpex, "otc")
+            else:
+                st.warning("TPEx 產業分類數據暫無法取得，顯示細產業分類")
+                # 降級：用 SECTOR_MAP 但只取上櫃股
+                _sector_stats = compute_sector_analysis_custom(tpex_p, tpex_i, hard_risk)
+                _scanner_layer1_2(_sector_stats, "otc_fallback")
+        else:
+            with st.spinner("載入產業數據..."):
+                tpex_ind_map = fetch_tpex_industry_map()
+                stats_tpex = compute_industry_stats(tpex_ind_map, tpex_p, tpex_i, hard_risk)
+            _scanner_layer3_4(st.session_state.scanner_sector, stats_tpex, tpex_p, tpex_i)
+
+    # ── 細產業（自選 SECTOR_MAP 分類）───────────────────────────
+    with t_custom:
+        if not st.session_state.get("scanner_sector"):
+            custom_stats = compute_sector_analysis_custom(prices, insts, hard_risk)
+            _scanner_layer1_2(custom_stats, "custom")
+        else:
+            custom_stats = compute_sector_analysis_custom(prices, insts, hard_risk)
+            _scanner_layer3_4(st.session_state.scanner_sector, custom_stats, prices, insts)
+
+
+def compute_sector_analysis_custom(prices, insts, hard_risk):
+    """用自定義 SECTOR_MAP 計算產業統計（細產業模式）"""
+    stats = []
+    total_vol_all = sum(p.get("volume", 0) or 0 for p in prices.values()) or 1
+    for sec_name, info in SECTOR_MAP.items():
+        stocks = []
+        for code in info.get("stocks", []):
+            if code in hard_risk:
+                continue
+            p = prices.get(code)
+            if p and p.get("price", 0) > 0:
+                inst = insts.get(code, {})
+                stocks.append({
+                    "code":  code,
+                    "name":  nm(code),
+                    "price": p["price"],
+                    "chg":   p.get("chg_pct", 0) or 0,
+                    "vol":   p.get("volume", 0) or 0,
+                    "f":     inst.get("f", 0) or 0,
+                    "t":     inst.get("t", 0) or 0,
+                })
+        if not stocks:
+            continue
+        total_vol = sum(s["vol"] for s in stocks)
+        avg_chg   = round(sum(s["chg"] for s in stocks) / len(stocks), 2)
+        net_inst  = sum(s["f"] + s["t"] for s in stocks)
+        up_cnt    = sum(1 for s in stocks if s["chg"] > 0)
+        dn_cnt    = sum(1 for s in stocks if s["chg"] < 0)
+        weight_pct  = round(total_vol / total_vol_all * 100, 2)
+        exp_weight  = round(100 / max(len(SECTOR_MAP), 1), 2)
+        weight_diff = round(weight_pct - exp_weight, 2)
+        stats.append({
+            "name":       sec_name,
+            "count":      len(stocks),
+            "avg_chg":    avg_chg,
+            "total_vol":  total_vol,
+            "weight_pct": weight_pct,
+            "weight_diff": weight_diff,
+            "net_inst":   net_inst,
+            "up":         up_cnt,
+            "dn":         dn_cnt,
+            "stocks":     sorted(stocks, key=lambda x: x["chg"], reverse=True),
+        })
+    return stats
 
 
 def tab_analysis():
@@ -1879,44 +2096,100 @@ def tab_analysis():
 
 
 def tab_calendar():
+    """財經行事曆（Gemini 驅動 + 台灣財報截止日）"""
     st.markdown("### 📅 財經行事曆")
-    gkey=st.session_state.gemini_key
-    c1,c2,c3,c4=st.columns([1,3,3,1])
+    gkey = st.session_state.gemini_key
+
+    # ── 月份導覽（避免 if/else 單行寫法）──────────────────────
+    c1, c2, c3, c4 = st.columns([1, 3, 3, 1])
     with c1:
-        if st.button("◄",use_container_width=True):
-            if st.session_state.cal_month==1: st.session_state.cal_month=12; st.session_state.cal_year-=1
-            else: st.session_state.cal_month-=1
-            st.session_state.cal_events=[]; st.session_state.cal_events_ts=None; st.rerun()
+        if st.button("◄", use_container_width=True, key="cal_prev"):
+            if st.session_state.cal_month == 1:
+                st.session_state.cal_month = 12
+                st.session_state.cal_year -= 1
+            else:
+                st.session_state.cal_month -= 1
+            st.session_state.cal_events = []
+            st.session_state.cal_events_ts = None
+            st.rerun()
     with c2:
-        mzh=["一","二","三","四","五","六","七","八","九","十","十一","十二"][st.session_state.cal_month-1]
-        st.markdown(f'<div style="text-align:center;font-size:17px;font-weight:700;color:#fff;padding:8px">{st.session_state.cal_year}年{mzh}月</div>',unsafe_allow_html=True)
+        mzh_list = ["一","二","三","四","五","六","七","八","九","十","十一","十二"]
+        mzh = mzh_list[st.session_state.cal_month - 1]
+        st.markdown(
+            f'<div style="text-align:center;font-size:17px;font-weight:700;color:#fff;padding:8px">' +
+            f'{st.session_state.cal_year}年{mzh}月</div>',
+            unsafe_allow_html=True)
     with c3:
-        if not gkey: st.warning("設定 Gemini Key 以啟用 AI 搜尋")
-        else: st.success("🤖 Gemini 搜尋已啟用")
+        if gkey:
+            st.success("🤖 Gemini 搜尋已啟用")
+        else:
+            st.warning("設定 Gemini Key 以啟用 AI 搜尋")
     with c4:
-        if st.button("►",use_container_width=True):
-            if st.session_state.cal_month==12: st.session_state.cal_month=1; st.session_state.cal_year+=1
-            else: st.session_state.cal_month+=1
-            st.session_state.cal_events=[]; st.session_state.cal_events_ts=None; st.rerun()
-    c_r,c_t=st.columns(2)
+        if st.button("►", use_container_width=True, key="cal_next"):
+            if st.session_state.cal_month == 12:
+                st.session_state.cal_month = 1
+                st.session_state.cal_year += 1
+            else:
+                st.session_state.cal_month += 1
+            st.session_state.cal_events = []
+            st.session_state.cal_events_ts = None
+            st.rerun()
+
+    c_r, c_t = st.columns(2)
     with c_r:
-        if st.button("🔄 重新搜尋事件",use_container_width=True):
-            st.session_state.cal_events=[]; st.session_state.cal_events_ts=None; st.rerun()
+        if st.button("🔄 重新搜尋事件", use_container_width=True, key="cal_refresh"):
+            st.session_state.cal_events = []
+            st.session_state.cal_events_ts = None
+            st.rerun()
     with c_t:
-        if st.button("📅 回到本月",use_container_width=True):
-            st.session_state.cal_year=date.today().year; st.session_state.cal_month=date.today().month
-            st.session_state.cal_events=[]; st.session_state.cal_events_ts=None; st.rerun()
-    with st.spinner("🤖 Gemini 搜尋財經事件..."):
-        events=gemini_fetch_events(gkey,st.session_state.cal_year,st.session_state.cal_month)
+        if st.button("📅 回到本月", use_container_width=True, key="cal_today"):
+            st.session_state.cal_year = date.today().year
+            st.session_state.cal_month = date.today().month
+            st.session_state.cal_events = []
+            st.session_state.cal_events_ts = None
+            st.rerun()
+
+    # ── 取得事件（含錯誤保護）──────────────────────────────────
+    events = []
+    try:
+        with st.spinner("🤖 搜尋財經事件..."):
+            events = gemini_fetch_events(gkey, st.session_state.cal_year, st.session_state.cal_month)
+    except Exception as err:
+        st.warning(f"事件載入失敗：{err}，顯示預設事件")
+        try:
+            events = _default_events(st.session_state.cal_year, st.session_state.cal_month)
+        except Exception:
+            events = []
+
+    if not events:
+        st.error("事件清單為空，請重新搜尋")
+        return
+
     if not gkey:
-        st.info("💡 未設定 Gemini API Key，顯示預設重要事件。設定後可獲得完整 AI 財經行事曆。")
-    bull_cnt=sum(1 for e in events if e.get("impact")=="bullish")
-    bear_cnt=sum(1 for e in events if e.get("impact")=="bearish")
-    co1,co2,co3,co4=st.columns(4)
-    co1.metric("📋 總事件",len(events)); co2.metric("🟢 利多",bull_cnt)
-    co3.metric("🔴 利空",bear_cnt); co4.metric("⚪ 中性",len(events)-bull_cnt-bear_cnt)
-    cal_html=build_calendar_html(events,st.session_state.cal_year,st.session_state.cal_month)
-    components.html(cal_html,height=1200,scrolling=True)
+        st.info("💡 未設定 Gemini API Key，顯示預設重要事件（含台灣財報截止日）。設定後可獲得完整 AI 行事曆。")
+
+    # ── 統計 ─────────────────────────────────────────────────
+    bull_cnt = sum(1 for e in events if e.get("impact") == "bullish")
+    bear_cnt = sum(1 for e in events if e.get("impact") == "bearish")
+    co1, co2, co3, co4 = st.columns(4)
+    co1.metric("📋 總事件", len(events))
+    co2.metric("🟢 利多", bull_cnt)
+    co3.metric("🔴 利空", bear_cnt)
+    co4.metric("⚪ 中性", len(events) - bull_cnt - bear_cnt)
+
+    # ── 月曆 HTML ─────────────────────────────────────────────
+    try:
+        cal_html = build_calendar_html(events, st.session_state.cal_year, st.session_state.cal_month)
+        components.html(cal_html, height=1250, scrolling=True)
+    except Exception as err:
+        st.error(f"月曆渲染失敗：{err}")
+        # 降級顯示：純文字清單
+        st.markdown("### 📋 本月事件清單")
+        pfx = f"{st.session_state.cal_year}-{st.session_state.cal_month:02d}"
+        ev_this_month = [e for e in events if e.get("date","").startswith(pfx)]
+        for e in sorted(ev_this_month, key=lambda x: x.get("date","")):
+            icon = "🟢" if e.get("impact") == "bullish" else ("🔴" if e.get("impact") == "bearish" else "⚪")
+            st.markdown(f"**{e.get('date','')[5:]} {icon} {e.get('title','')}** — {e.get('detail','')}")
 
 
 def tab_rank():
