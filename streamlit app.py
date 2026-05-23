@@ -592,14 +592,38 @@ body{background:#1a2332;color:#e8eaf0;font-family:'Helvetica Neue',Arial,sans-se
 # ── 官方產業分類快取 ──────────────────────────────────────────
 
 @st.cache_data(ttl=86400)
-def fetch_official_industry_map() -> dict:
-    """官方產業分類字典 { 股號: 產業名稱 }，24 小時快取。"""
+def fetch_official_industry_map(token: str = "") -> dict:
+    """官方產業分類字典 { 股號: 產業名稱 }，優先 FinMind，Fallback TWSE/TPEx。"""
     mapping = {}
 
     def clean_name(name):
         return name.replace("工業", "").replace("業", "") if len(name) > 2 else name
 
-    # 上市（TWSE）
+    print("【DEBUG】開始執行 fetch_official_industry_map...")
+
+    # 1. FinMind（優先，含興櫃）
+    if token:
+        try:
+            r = requests.get(
+                FINMIND_API,
+                params={"dataset": "TaiwanStockInfo", "token": token},
+                headers=HDR, timeout=25, verify=False)
+            if r.status_code == 200:
+                for item in r.json().get("data", []):
+                    c = str(item.get("stock_id", "")).strip()
+                    i = str(item.get("industry_category", "")).strip()
+                    if c and i and i not in ("None", ""):
+                        mapping[c] = clean_name(i)
+                print(f"【DEBUG】FinMind 成功載入 {len(mapping)} 筆")
+            else:
+                print(f"【DEBUG】FinMind API 錯誤狀態碼: {r.status_code}")
+        except Exception as e:
+            print(f"【DEBUG】FinMind API 錯誤: {e}")
+
+    if mapping:
+        return mapping
+
+    # 2. Fallback：TWSE
     try:
         r = requests.get(
             "https://openapi.twse.com.tw/v1/opendata/t187ap03_L",
@@ -610,23 +634,31 @@ def fetch_official_industry_map() -> dict:
                 i = str(item.get("產業類別", "")).strip()
                 if c and i:
                     mapping[c] = clean_name(i)
-    except Exception:
-        pass
+            print(f"【DEBUG】TWSE 成功載入 {len(mapping)} 筆")
+        else:
+            print(f"【DEBUG】TWSE 狀態碼: {r.status_code}")
+    except Exception as e:
+        print(f"【DEBUG】TWSE API 錯誤: {e}")
 
-    # 上櫃（TPEx）
+    # 3. Fallback：TPEx
     try:
         r = requests.get(
             "https://www.tpex.org.tw/openapi/v1/tpex_listed_companies",
             headers=HDR, timeout=25, verify=False)
         if r.status_code == 200:
+            before = len(mapping)
             for item in r.json():
                 c = str(item.get("SecuritiesCompanyCode", "")).strip()
                 i = str(item.get("Industry", "")).strip()
                 if c and i:
                     mapping[c] = clean_name(i)
-    except Exception:
-        pass
+            print(f"【DEBUG】TPEx 新增 {len(mapping)-before} 筆，合計 {len(mapping)} 筆")
+        else:
+            print(f"【DEBUG】TPEx 狀態碼: {r.status_code}")
+    except Exception as e:
+        print(f"【DEBUG】TPEx API 錯誤: {e}")
 
+    print(f"【DEBUG】fetch_official_industry_map 完成，共 {len(mapping)} 筆")
     return mapping
 
 @st.cache_data(ttl=86400)
@@ -1230,10 +1262,9 @@ def build_full_html(results):
             f'{nav}</div>{cards}</div></body></html>')
 
 # ── 籌碼掃描：産業分析 ────────────────────────────────────────
-def compute_sector_stats(prices, insts, hard_risk):
-    """動態讀取官方產業分類，不再依賴硬編碼 SECTOR_MAP。"""
+def compute_sector_stats(prices, insts, hard_risk, sector_mapping):
+    """依官方產業分類動態分群，回傳各產業統計列表。"""
     from collections import defaultdict
-    sector_mapping = fetch_official_industry_map()
     total_vol = sum(p.get("volume", 0) or 0 for p in prices.values()) or 1
     sector_groups = defaultdict(list)
 
@@ -1524,7 +1555,14 @@ def tab_scanner():
     inst_note=f"法人：{len(insts)} 檔" if insts else "法人：今日未取得"
     st.caption(f"股價：{len(prices)} 檔 | {inst_note} | {time_note}")
     if not prices: st.error("⚠️ 無法取得股價數據"); return
-    stats = compute_sector_stats(prices, insts, hard_risk)
+    # ── 官方產業分類（Token 優先，Fallback TWSE/TPEx）────────
+    _token = st.session_state.get("token", "")
+    if not _token:
+        st.info("💡 設定 FinMind Token 可取得完整產業分類（含興櫃），目前使用 TWSE/TPEx 官方分類。")
+    sector_mapping = fetch_official_industry_map(_token)
+    if not sector_mapping:
+        st.warning("⚠️ 無法取得產業分類，所有股票暫歸『其他』。請確認網路或稍後重試。")
+    stats = compute_sector_stats(prices, insts, hard_risk, sector_mapping)
     if not st.session_state.get("scanner_sector"):
         # ── 第一層：強勢/弱勢概覽 ─────────────────────────────
         sorted_desc=sorted(stats,key=lambda x:x["avg_chg"],reverse=True)
