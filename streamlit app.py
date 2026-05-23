@@ -899,47 +899,163 @@ def get_yahoo_target(sid):
 # ─────────────────────────────────────────────────────────────
 # 量化評分（原始機制）
 # ─────────────────────────────────────────────────────────────
-def calc_quant_score(p,d5,d200,fc,tc,pe,pea,rev_yoy,tp):
-    sc=50; pos=[]; neg=[]; warn=[]
+def calc_quant_score(p, d5, d200, fc, tc, pe, pea, rev_yoy, tp,
+                     tp_h=None, ma20=None, ma60=None, rev_mom=None, inst=None):
+    """
+    評分系統 v2.0（針對高成長科技股優化）
+    ─────────────────────────────────────
+    ① 技術面：5日乖離加趨勢濾網（月線/季線）
+    ② 目標價：以最高分析師目標為基準，超越均值不扣分
+    ③ 基本面：YoY + MoM 雙軌，捕捉庫存去化訊號
+    ④ 籌碼面：連買/連賣天數 + 異常爆量否決條件
+    ⑤ S級防禦：80+分需有法人買超或營收正向支撐
+    """
+    sc = 50; pos = []; neg = []; warn = []
+
+    # ── ① 技術面：5日線乖離 + 趨勢濾網 ─────────────────────────
     if d5 is not None:
-        if   d5<-5:  sc+=18;pos.append(f"5日線回測{d5:+.1f}%（良好進場）")
-        elif d5<=2:  sc+=10;pos.append(f"5日乖離健康{d5:+.1f}%")
-        elif d5<=8:  sc+=2; warn.append(f"5日乖離偏高{d5:+.1f}%")
-        else:        sc-=10;neg.append(f"5日乖離過高{d5:+.1f}%")
-    if d200 and d200>50: sc-=8;warn.append(f"年線乖離偏高{d200:+.1f}%")
-    if tp and p:
-        up=(tp-p)/p*100
-        if   up>20:  sc+=15;pos.append(f"距目標+{up:.1f}%空間")
-        elif up>10:  sc+=8; pos.append(f"距目標+{up:.1f}%")
-        elif up>0:   sc+=3
-        elif up>-10: sc-=5; warn.append(f"現價略超目標{up:.1f}%")
-        else:        sc-=12;neg.append(f"現價大幅超越目標{up:.1f}%")
+        if d5 < -5:
+            # 趨勢濾網：確認未在空頭趨勢中接刀
+            above_ma20 = (p >= ma20) if (ma20 and ma20 > 0) else True
+            above_ma60 = (p >= ma60) if (ma60 and ma60 > 0) else True
+            if above_ma20:
+                sc += 18; pos.append(f"5日線回測{d5:+.1f}%（守月線，良好進場點）")
+            elif above_ma60:
+                sc += 8; pos.append(f"5日線回測{d5:+.1f}%（跌破月線但守季線，謹慎進場）")
+                warn.append("已跌破月線，需確認量縮止跌再考慮進場，避免接刀")
+            else:
+                sc -= 5; neg.append(f"5日乖離{d5:+.1f}%且跌破月線季線，空頭趨勢接刀高風險")
+        elif d5 <= 2:
+            sc += 10; pos.append(f"5日乖離健康{d5:+.1f}%")
+        elif d5 <= 8:
+            sc += 2; warn.append(f"5日乖離偏高{d5:+.1f}%，稍注意追高風險")
+        else:
+            sc -= 10; neg.append(f"5日乖離過高{d5:+.1f}%，追高風險（若因當日急漲所致，建議等乖離收斂）")
+
+    # ── ① 技術面：年線乖離（成長股放寬）──────────────────────
+    if d200 and d200 > 80:
+        sc -= 5; warn.append(f"年線乖離偏高{d200:+.1f}%（半導體牛市可接受，請搭配基本面確認）")
+    elif d200 and d200 > 50:
+        sc -= 2; warn.append(f"年線乖離稍高{d200:+.1f}%")
+
+    # ── ② 目標價：以「最高分析師目標」為加分基準 ───────────────
+    # 超越均值目標不扣分（分析師均值可能落後市場），超越最高目標才給小懲罰
+    ref_tp = tp_h if (tp_h and tp_h > 0) else tp  # 優先使用最高目標
+    if ref_tp and p and ref_tp > 0:
+        up = (ref_tp - p) / p * 100
+        if up > 30:
+            sc += 15; pos.append(f"距最高分析師目標+{up:.1f}%，上漲空間充裕")
+        elif up > 15:
+            sc += 10; pos.append(f"距最高分析師目標+{up:.1f}%")
+        elif up > 5:
+            sc += 5; pos.append(f"距最高分析師目標+{up:.1f}%")
+        elif up >= 0:
+            sc += 2
+        elif up > -20:
+            warn.append(f"現價接近最高分析師目標（超出{abs(up):.1f}%），估值偏高，注意下檔風險")
+        else:
+            sc -= 5; neg.append(f"現價大幅超越最高分析師目標{abs(up):.1f}%，估值顯著偏高")
+
+    # ── ③ 基本面：月營收 YoY + MoM 雙軌 ─────────────────────────
+    # MoM 翻正 = 庫存去化末段早期訊號
+    mom_pos = (rev_mom is not None and rev_mom > 0)
     if rev_yoy is not None:
-        if   rev_yoy>=20:sc+=8; pos.append(f"月營收YoY+{rev_yoy:.1f}%（高成長）")
-        elif rev_yoy>=5: sc+=4; pos.append(f"月營收YoY+{rev_yoy:.1f}%")
-        elif rev_yoy<0:  sc-=5; neg.append(f"月營收年減{rev_yoy:.1f}%")
-    if   fc>=3:  sc+=12;pos.append(f"外資連買{fc}日")
-    elif fc>=1:  sc+=5; pos.append("外資今日買超")
-    elif fc<=-3: sc-=10;neg.append(f"外資連賣{abs(fc)}日")
-    elif fc<0:   sc-=4; warn.append("外資今日賣超")
-    if   tc>=5:  sc+=12;pos.append(f"投信連買{tc}日（深度認養）")
-    elif tc>=3:  sc+=8; pos.append(f"投信連買{tc}日")
-    elif tc>=1:  sc+=3; pos.append("投信今日買超")
-    elif tc<=-3: sc-=10;neg.append(f"投信連賣{abs(tc)}日")
-    elif tc<0:   sc-=4; warn.append("投信今日賣超")
-    if fc>0 and tc>0:   sc+=5; pos.append("外資投信同向買超")
-    elif fc<0 and tc<0: sc-=8; neg.append("外資投信同向賣超")
-    if pe and pea and pea>0:
-        pv=(pe-pea)/pea*100
-        if   pv<-20:sc+=8; pos.append(f"PE{pe:.1f}x低估")
-        elif pv<0:  sc+=4
-        elif pv>20: sc-=5; warn.append(f"PE{pe:.1f}x偏高")
-    sc=max(0,min(100,sc))
-    if   sc>=80: rt,lb="S","強烈推薦"
-    elif sc>=65: rt,lb="A","建議買入"
-    elif sc>=45: rt,lb="B","觀　望"
-    else:        rt,lb="C","避　開"
-    return sc,rt,lb,pos,neg,warn
+        if rev_yoy >= 20:
+            sc += 8; pos.append(f"月營收YoY+{rev_yoy:.1f}%（高成長）")
+            if mom_pos: sc += 2; pos.append(f"MoM+{rev_mom:.1f}%雙軌加速成長")
+        elif rev_yoy >= 5:
+            sc += 4; pos.append(f"月營收YoY+{rev_yoy:.1f}%")
+            if mom_pos: sc += 1
+        elif rev_yoy >= 0:
+            if mom_pos: sc += 2; pos.append(f"月營收持平，MoM+{rev_mom:.1f}%顯示止跌回升")
+        elif rev_yoy >= -15:
+            # 輕度衰退，MoM 翻正是關鍵早期訊號
+            if mom_pos:
+                sc += 1; warn.append(f"YoY{rev_yoy:.1f}%仍負，但MoM+{rev_mom:.1f}%，可能為庫存去化末段初期復甦")
+            else:
+                sc -= 3; neg.append(f"月營收年減{rev_yoy:.1f}%")
+        else:
+            # 重度衰退
+            if mom_pos:
+                sc -= 4; neg.append(f"月營收重度衰退YoY{rev_yoy:.1f}%（MoM+{rev_mom:.1f}%翻正，待觀察持續性）")
+            else:
+                sc -= 8; neg.append(f"月營收大幅年減{rev_yoy:.1f}%")
+
+    # ── ③ 基本面：PE 估值 ────────────────────────────────────────
+    if pe and pea and pea > 0:
+        pv = (pe - pea) / pea * 100
+        if pv < -20: sc += 8; pos.append(f"PE{pe:.1f}x相對低估（低於自身均值{abs(pv):.0f}%）")
+        elif pv < 0: sc += 4
+        elif pv > 30: sc -= 5; warn.append(f"PE{pe:.1f}x明顯偏高（較自身均值高{pv:.0f}%）")
+
+    # ── ④ 籌碼面：外資 + 異常爆量否決條件 ───────────────────────
+    # 偵測「連買後單日倒貨」的假籌碼現象
+    f_veto = False; t_veto = False
+    if inst and len(inst) >= 2:
+        f_vals = [abs(d.get("f", 0)) for d in inst]
+        t_vals = [abs(d.get("t", 0)) for d in inst]
+        f_5avg = sum(f_vals[:-1]) / max(len(f_vals) - 1, 1)
+        t_5avg = sum(t_vals[:-1]) / max(len(t_vals) - 1, 1)
+        # 今日外資大量賣超（超過過去5日均量2倍）且前期有買入
+        if inst[-1].get("f", 0) < 0 and f_5avg > 0 and abs(inst[-1]["f"]) > f_5avg * 2:
+            f_veto = True
+            warn.append(f"⚠️ 外資今日賣超{inst[-1]['f']:,}張（超過近期均量{f_5avg:.0f}張的2倍），連買紀錄可靠性存疑，疑似假籌碼")
+        if inst[-1].get("t", 0) < 0 and t_5avg > 0 and abs(inst[-1]["t"]) > t_5avg * 2:
+            t_veto = True
+            warn.append(f"⚠️ 投信今日賣超{inst[-1]['t']:,}張（超過近期均量{t_5avg:.0f}張的2倍），疑似連買後倒貨")
+
+    # 外資評分
+    if f_veto:
+        sc -= 8; neg.append("外資異常爆量出貨，疑似連買後倒貨（否決連買加分）")
+    elif fc >= 3:
+        sc += 12; pos.append(f"外資連買{fc}日")
+    elif fc >= 1:
+        sc += 5; pos.append("外資今日買超")
+    elif fc <= -3:
+        sc -= 10; neg.append(f"外資連賣{abs(fc)}日")
+    elif fc < 0:
+        sc -= 4; warn.append("外資今日賣超")
+
+    # 投信評分
+    if t_veto:
+        sc -= 8; neg.append("投信異常爆量出貨，疑似連買後倒貨（否決連買加分）")
+    elif tc >= 5:
+        sc += 12; pos.append(f"投信連買{tc}日（深度認養）")
+    elif tc >= 3:
+        sc += 8; pos.append(f"投信連買{tc}日")
+    elif tc >= 1:
+        sc += 3; pos.append("投信今日買超")
+    elif tc <= -3:
+        sc -= 10; neg.append(f"投信連賣{abs(tc)}日")
+    elif tc < 0:
+        sc -= 4; warn.append("投信今日賣超")
+
+    # 同向獎懲
+    if fc > 0 and tc > 0 and not f_veto and not t_veto:
+        sc += 5; pos.append("外資投信同向買超，無對作")
+    elif fc < 0 and tc < 0:
+        sc -= 8; neg.append("外資投信同向賣超，籌碼惡化")
+
+    sc = max(0, min(100, sc))
+
+    # ── ⑤ 評等 + S 級防禦條件 ─────────────────────────────────────
+    if sc >= 80:
+        # S 級必要防禦：法人至少一方買超 OR 營收正向，否則降為 A
+        inst_ok = (fc > 0 and not f_veto) or (tc > 0 and not t_veto)
+        rev_ok = (rev_yoy is not None and rev_yoy >= 0) or mom_pos
+        if inst_ok or rev_ok:
+            rt, lb = "S", "強烈推薦"
+        else:
+            rt, lb = "A", "建議買入"
+            warn.append("⚠️ 達S級分數，但法人籌碼與營收均無正向支撐，保守評為A級（防止純技術超跌錯誤評S）")
+    elif sc >= 65:
+        rt, lb = "A", "建議買入"
+    elif sc >= 45:
+        rt, lb = "B", "觀　望"
+    else:
+        rt, lb = "C", "避　開"
+
+    return sc, rt, lb, pos, neg, warn
 
 # ─────────────────────────────────────────────────────────────
 # 主分析
@@ -976,7 +1092,9 @@ def analyze(sid,token,disposed,full_delivery,delisting,gemini_del,force=False):
         if ya: tp=ya["target"]; tp_h=ya["high"]; tp_l=ya["low"]; tp_n=ya["count"]; ts=ya["source"]
         elif pea and pe and rev_yoy is not None and pe>0:
             tp=round(p*(pea/pe)*min(max(1+rev_yoy/100,0.7),1.8),0); ts="PE均值×成長估算"
-        sc,rt,lb,pos,neg,warn=calc_quant_score(p,d5,d200,fc,tc,pe,pea,rev_yoy,tp)
+        sc,rt,lb,pos,neg,warn=calc_quant_score(
+            p, d5, d200, fc, tc, pe, pea, rev_yoy, tp,
+            tp_h=tp_h, ma20=ma20, ma60=ma60, rev_mom=rev_mom, inst=inst)
 
         # ── 極端跌幅硬風控（疑似下市風險）──────────────────────
         # 若股價較 52 週高點下跌超過 80%，強制降為 C 評等
@@ -997,9 +1115,17 @@ def analyze(sid,token,disposed,full_delivery,delisting,gemini_del,force=False):
             if is_full_del: neg.insert(0,"🚨 全額交割股：流動性極差，強制C評等")
             if is_delisting and not any("52W" in n for n in neg): neg.insert(0,"⚠️ 下市警告：面臨下市風險，強制C評等")
         if is_disposed and not is_hard_risk:
-            sc=max(0,sc-10)
-            if sc<45 and rt in ("S","A"): rt="B"; lb="觀　望"
-            warn.insert(0,"⏱ 處置股：每5~20分鐘撮合，流動性受限")
+            # 強勢飆股例外：高成長+法人強力認養的處置股可能是主升段
+            rev_strong = ((rev_yoy is not None and rev_yoy >= 10) or
+                          (rev_mom is not None and rev_mom > 5))
+            inst_strong = (fc >= 3 or tc >= 3)
+            if rev_strong and inst_strong:
+                sc = max(0, sc - 3)  # 僅輕罰3分（高成長飆股可能因漲停遭處置）
+                warn.insert(0, "⏱ 處置股（因強勢漲停遭處置，法人籌碼+營收仍強，酌減懲罰為-3分）")
+            else:
+                sc = max(0, sc - 10)
+                if sc < 45 and rt in ("S", "A"): rt = "B"; lb = "觀　望"
+                warn.insert(0, "⏱ 處置股：每5~20分鐘撮合，流動性受限")
         result={"sid":sid,"name":nm(sid),"price":p,"prev":prev["close"],"chg":chg,
                 "ma5":ma5,"ma20":ma20,"ma60":ma60,"ma200":ma200,"d5":d5,"d200":d200,
                 "h52":round(max(r["high"] for r in r52),2),
@@ -1224,17 +1350,38 @@ def build_wiwynn(r):
             f'font-size:10px;padding:1px 7px;border-radius:99px;margin-left:5px">👥{tp_n}位</span>') if tp_n>0 else ""
         rng_bar=""
         if tp_h and tp_l and tp_h>tp_l:
-            rng=tp_h-tp_l; cp3=min(max((p-tp_l)/rng*100,0),100); mp3=min(max((tp-tp_l)/rng*100,0),100)
-            rng_bar=(f'<div style="margin-top:9px"><p style="font-size:10px;font-weight:600;color:#8fa3b8;margin-bottom:5px">分析師目標區間</p>'
-                     f'<div style="position:relative;background:#1a2332;border-radius:5px;height:11px;margin-bottom:3px">'
-                     f'<div style="position:absolute;left:{mp3:.0f}%;top:-3px;width:3px;height:17px;background:#5dade2;border-radius:2px;z-index:2"></div>'
-                     f'<div style="position:absolute;left:{cp3:.0f}%;top:-3px;width:3px;height:17px;background:#fff;border-radius:2px;z-index:3"></div></div>'
-                     f'<div style="display:flex;justify-content:space-between;font-size:10px;color:#8fa3b8">'
-                     f'<span>低 {tp_l:,.0f}</span><span style="color:#5dade2;font-weight:600">均 {tp:,.0f}</span>'
-                     f'<span>高 {tp_h:,.0f}</span></div></div>')
-        exc_cls="dn" if exceed else "up"
-        upbox=(f'<div class="bd" style="margin-top:7px">✗ 現價超越目標{abs(up2):.1f}%</div>' if exceed else
-               f'<div class="bo" style="margin-top:7px">✅ 距目標+{up2:.1f}%，具合理風險報酬比</div>')
+            rng=tp_h-tp_l
+            cp3=min(max((p-tp_l)/rng*100,0),100)   # 現價位置
+            mp3=min(max((tp-tp_l)/rng*100,0),100)  # 均值位置
+            rng_bar=(
+                f'<div style="margin-top:9px">'
+                f'<p style="font-size:10px;font-weight:600;color:#8fa3b8;margin-bottom:5px">'
+                f'分析師目標區間（⭐ 評分以最高目標 {tp_h:,.0f} 元為基準）</p>'
+                f'<div style="position:relative;border-radius:5px;height:11px;margin-bottom:5px;'
+                f'background:linear-gradient(90deg,#27ae60 0%,#f39c12 55%,#e74c3c 100%)">'
+                f'<div style="position:absolute;left:{mp3:.0f}%;top:-4px;width:3px;height:19px;'
+                f'background:#5dade2;border-radius:2px;z-index:2"></div>'
+                f'<div style="position:absolute;left:{cp3:.0f}%;top:-4px;width:3px;height:19px;'
+                f'background:#fff;border-radius:2px;z-index:3"></div></div>'
+                f'<div style="display:flex;justify-content:space-between;font-size:10px">'
+                f'<span style="color:#27ae60;font-weight:600">低 {tp_l:,.0f}</span>'
+                f'<span style="color:#5dade2">均 {tp:,.0f} | 現價 {p:,.0f}</span>'
+                f'<span style="color:#e67e22;font-weight:700">高⭐ {tp_h:,.0f}</span>'
+                f'</div></div>'
+            )
+        # 評分基準：最高目標（tp_h），顯示：超越均值不顯示警告
+        ref_tp = tp_h if (tp_h and tp_h > 0) else tp
+        up_to_high = (ref_tp - p) / p * 100 if ref_tp and ref_tp > 0 else 0
+        up_to_avg  = (tp - p) / p * 100 if tp and tp > 0 else 0
+        exceed_high = up_to_high < 0
+        exceed_avg  = up_to_avg < 0
+        exc_cls = "dn" if exceed_high else "up"
+        if exceed_high:
+            upbox = f'<div class="bd" style="margin-top:7px">⚠️ 現價已超越最高分析師目標{abs(up_to_high):.1f}%，估值顯著偏高</div>'
+        elif exceed_avg:
+            upbox = f'<div class="bw" style="margin-top:7px">🟡 現價超越均值目標（超{abs(up_to_avg):.1f}%），但距最高目標仍有+{up_to_high:.1f}%空間</div>'
+        else:
+            upbox = f'<div class="bo" style="margin-top:7px">✅ 距最高分析師目標+{up_to_high:.1f}%（評分以最高目標為基準），風險報酬比良好</div>'
         # 預計算：避免 Python < 3.12 f-string 反斜線問題
         _tp_hi=(f'<div class="row"><span class="rl">最高目標</span>'
                 f'<span class="rv">{tp_h:,.0f}元</span></div>') if tp_h else ""
@@ -1246,8 +1393,10 @@ def build_wiwynn(r):
                  f'<div class="row"><span class="rl">分析師均值</span>'
                  f'<span class="rv {exc_cls}" style="font-size:15px;font-weight:700">{tp:,.0f} 元</span></div>'
                  +_tp_hi+_tp_lo+
-                 f'<div class="row"><span class="rl">vs 現價</span>'
-                 f'<span class="rv {exc_cls}"><strong>{up2:+.1f}%</strong></span></div>'
+                 f'<div class="row"><span class="rl">vs 現價（均值）</span>'
+                 f'<span class="rv" style="color:{'"#ff6b6b"' if exceed_avg else '"#4ecca3"'}">{up_to_avg:+.1f}%</span></div>'
+                 f'<div class="row"><span class="rl">vs 現價（最高⭐）</span>'
+                 f'<span class="rv {exc_cls}"><strong>{up_to_high:+.1f}%</strong></span></div>'
                  f'{rng_bar}'
                  f'<div class="tp-wrap"><div class="tp-fill" style="width:{bw:.1f}%;background:{fill_c}"></div></div>'
                  f'<div class="tp-lbl"><span>0</span><span>現價{p:,.0f}</span><span>{tp:,.0f}</span></div>'
