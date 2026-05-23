@@ -49,60 +49,32 @@ h1,h2,h3,h4{color:#fff!important}
 # 擴充股票資料庫
 # ─────────────────────────────────────────────────────────────
 ALL_STOCKS = {
-    "1101":"台泥","1102":"亞泥","1103":"嘉泥","1104":"環泥","1108":"幸福",
-    "1109":"信大","1110":"東泥","1201":"味全","1203":"味王","1210":"大成",
-    "1215":"卜蜂","1216":"統一","1217":"愛之味","1218":"泰山","1219":"福壽",
-    "1220":"台榮","1225":"福懋油","1227":"佳格","1229":"聯華","1231":"聯華食",
-    "1301":"台塑","1303":"南亞","1304":"台聚","1305":"華夏","1307":"三芳",
-    "1308":"亞聚","1309":"台達化","1310":"台苯","1312":"國喬","1313":"聯成",
-    "1314":"中石化","1315":"達新","1319":"東陽","1326":"台化","1402":"遠東新",
-    "1409":"新纖","1419":"新紡","1434":"福懋","1440":"南紡","1444":"力麗",
-    "1447":"力鵬","1476":"儒鴻","1477":"聚陽","1503":"士電","1504":"東元",
-    "1513":"中興電","1514":"亞力","1515":"力山","1519":"華城","1522":"堤維西",
-    "1532":"勤美","1536":"和大","1560":"中砂","1590":"亞德客-KY","1605":"華新",
-    "1608":"華榮","1609":"大亞","1701":"中化","1702":"南僑","1707":"葡萄王",
-    "1710":"東聯","1711":"永光","1712":"興農","1714":"和桐","1717":"長興",
-    "1722":"台肥","1723":"中碳","1736":"喬山","1795":"美時","1802":"台玻",
-    "1809":"中釉","1903":"士紙","1904":"正隆","1905":"華紙","1907":"永豐餘",
-    "1909":"榮成","2002":"中鋼","2006":"東和鋼鐵","2009":"第一銅","2014":"中鴻",
-    "2015":"豐興","2023":"燁輝","2027":"大成鋼","2031":"新光鋼","2049":"上銀",
-    "2059":"川湖","2101":"南港","2103":"台橡","2104":"國際中橡","2105":"正新",
-    "2106":"建大","2201":"裕隆","2204":"中華","2206":"三陽工業","2207":"和泰車",
-    "2301":"光寶科","2303":"聯電","2308":"台達電","2317":"鴻海","2323":"中環",
-    "2324":"仁寶","2327":"國巨","2330":"台積電","2332":"友訊","2337":"旺宏",
-    "2344":"華邦電","2345":"智邦","2352":"佳世達","2353":"宏碁","2356":"英業達",
-    "2357":"華碩","2362":"藍天","2368":"金像電","2371":"大同","2376":"技嘉",
-    "2377":"微星","2379":"瑞昱","2382":"廣達","2383":"台光電","2385":"群光",
-    "2395":"研華","2401":"凌陽","2404":"漢唐","2408":"南亞科","2409":"友達",
-    "2412":"中華電","2439":"美律","2449":"京元電子","2454":"聯發科","2474":"可成",
-    "2481":"強茂","2489":"瑞軒","2492":"華新科","2498":"宏達電","2515":"中工","2520":"冠德","2542":"興富發","2543":"遠雄","2548":"華固",
-    "2603":"長榮","2605":"新興","2606":"裕民","2609":"陽明","2610":"華航",
-    "2615":"萬海","2618":"長榮航","2633":"台灣高鐵","2634":"漢翔","2637":"慧洋-KY",
-    "2707":"晶華","2727":"王品","2801":"彰銀","2809":"京城銀","2812":"台中銀",
-    "2834":"臺企銀","2880":"華南金","2881":"富邦金","2882":"國泰金","2883":"開發金",
-    "2884":"玉山金","2885":"元大金","2886":"兆豐金","2887":"台新金","2888":"新光金",
-    "2890":"永豐金","2891":"中信金","2892":"第一金","2897":"王道銀行","2912":"統一超",
-    "3004":"豐達科","3005":"神基","3008":"大立光","3017":"奇鋐","3023":"信邦",
-    "3034":"聯詠","3035":"智原","3036":"文曄","3037":"欣興","3044":"健鼎",
-    "3045":"台灣大","3231":"緯創","3376":"新日興","3406":"玉晶光","3443":"創意",
-    "3450":"聯鈞","3481":"群創","3515":"華擎","3529":"力旺","3532":"台勝科",
-    "3533":"嘉澤","3583":"辛耘","3588":"通嘉","3596":"智易","3653":"健策",
-    "3661":"世芯-KY","3665":"貿聯-KY","3673":"TPK-KY","3682":"亞太電","3702":"大聯大",
-    "3704":"合勤控","3706":"神達","3708":"上緯投控","3711":"日月光投控","3714":"富采","4147":"中裕","4162":"智擎","4174":"浩鼎","4532":"瑞智","4551":"智伸科",
-    "4763":"材料-KY","4915":"致伸","4919":"新唐","4927":"泰鼎-KY","4938":"和碩",
-    "4958":"臻鼎-KY","4961":"天鈺","4966":"譜瑞-KY","4968":"立積","5225":"東科-KY",
-    "5269":"祥碩","5274":"信驊","5288":"豐祥-KY","5347":"世界先進","5371":"中光電",
-    "5434":"崇越","5483":"中美晶","5522":"遠雄","5871":"中租-KY","5876":"上海商銀",
-    "5880":"合庫金","5904":"寶雅","6153":"嘉聯益","6205":"詮欣","6213":"聯茂",
-    "6239":"力成","6269":"台郡","6271":"同欣電","6278":"台表科","6285":"啟碁",
-    "6409":"旭隼","6414":"樺漢","6415":"矽力-KY","6456":"GIS-KY","6462":"神盾",
-    "6488":"環球晶","6505":"台塑化","6515":"穎威","6526":"達發","6531":"愛普*",
-    "6533":"晶心科","6669":"緯穎","6670":"復盛應用","6770":"力積電","8046":"南電",
-    "8069":"元太","8150":"南茂","8299":"群聯","8454":"富邦媒","8464":"億豐",
-    "9904":"寶成","9910":"豐泰","9914":"美利達","9917":"中保科","9921":"巨大",
-    "9933":"中鼎","9938":"百和","9940":"信義","9945":"潤泰新","9958":"世紀鋼","7769":"鴻勁"
+    "2330":"台積電","2317":"鴻海","2454":"聯發科","2308":"台達電","2382":"廣達",
+    "2303":"聯電","2327":"國巨","2357":"華碩","2379":"瑞昱","2376":"技嘉",
+    "2313":"華通","2368":"金像電","2603":"長榮","2609":"陽明","2615":"萬海",
+    "3711":"日月光投控","2412":"中華電","2886":"兆豐金","2881":"富邦金","2882":"國泰金",
+    "2884":"玉山金","2891":"中信金","1301":"台塑","1303":"南亞","2002":"中鋼",
+    "2408":"南亞科","2474":"可成","2385":"群光","3661":"世芯-KY","6669":"緯穎",
+    "2353":"宏碁","2356":"英業達","3034":"聯詠","3037":"欣興","3231":"緯創",
+    "1513":"中興電","2059":"川湖","2301":"光寶科","2337":"旺宏","2344":"華邦電",
+    "2352":"佳世達","2371":"大同","2395":"研華","2409":"友達","2474":"可成",
+    "2498":"宏達電","2603":"長榮","2606":"裕民","2609":"陽明","2610":"華航",
+    "2615":"萬海","2618":"長榮航","2633":"台灣高鐵","2801":"彰銀","2880":"華南金",
+    "2882":"國泰金","2883":"開發金","2885":"元大金","2887":"台新金","2890":"永豐金",
+    "2892":"第一金","2912":"統一超","3008":"大立光","3017":"奇鋐","3034":"聯詠",
+    "3035":"智原","3036":"文曄","3037":"欣興","3044":"健鼎","3048":"益登",
+    "3081":"聯惠","3105":"穩懋","3231":"緯創","3293":"鈊象","3406":"玉晶光",
+    "3443":"創意","3481":"群創","3529":"力旺","3533":"嘉澤","3550":"樂士",
+    "3583":"辛耘","3587":"閎康","3645":"達亮","3665":"貿聯-KY","3698":"隆達",
+    "3702":"大聯大","3706":"神達","3711":"日月光投控","4938":"和碩","4966":"譜瑞-KY",
+    "5347":"世界先進","5483":"中美晶","5880":"合庫金","6239":"力成","6271":"同欣電",
+    "6285":"啟碁","6415":"矽力-KY","6488":"環球晶","6510":"精測","6515":"穎威",
+    "6526":"達發","6533":"晶心科","6669":"緯穎","6770":"力積電","8046":"南電",
+    "8150":"南茂","8299":"群聯","5274":"信驊","4919":"新唐","4958":"臻鼎-KY",
+    "4966":"譜瑞-KY","4968":"立積","5269":"祥碩","5347":"世界先進","5371":"中光電",
+    "5438":"東友","5471":"松翰","5274":"信驊","3167":"達亮",
 }
-def nm(s): return ALL_STOCKS.get(s, s)
+# nm() 已在上方 SECTOR_MAP 區塊中定義
 
 FINMIND_API = "https://api.finmindtrade.com/api/v4/data"
 GEMINI_MODEL = "gemini-2.0-flash"
@@ -118,12 +90,82 @@ VBC = {"S":"#27ae60","A":"#27ae60","B":"#f39c12","C":"#e74c3c"}
 VTC = {"S":"#a8e6bb","A":"#a8e6bb","B":"#fae0a8","C":"#f7c1c1"}
 NAMES = ALL_STOCKS
 
+# ─────────────────────────────────────────────────────────────
+# 產業分類（籌碼掃描使用）
+# ─────────────────────────────────────────────────────────────
+SECTOR_MAP = {
+    "💎 半導體/晶圓製造": {
+        "stocks": ["2330","2303","5347","6770","2408","5483"],
+        "desc": "台積電、聯電、世界先進、力積電"
+    },
+    "🔵 IC設計": {
+        "stocks": ["2454","3034","3661","5274","6415","4966","4919","5269","4968","3443","3035","6526","3529","3105","6533","3588"],
+        "desc": "聯發科、聯詠、世芯、信驊、矽力、創意、智原"
+    },
+    "🤖 AI伺服器/雲端": {
+        "stocks": ["6669","2382","3231","2356","4938","2317"],
+        "desc": "緯穎、廣達、緯創、英業達、和碩"
+    },
+    "🌡️ 散熱/機殼/連接器": {
+        "stocks": ["3017","3533","3665","3048","2059","3587"],
+        "desc": "奇鋐、嘉澤、貿聯-KY、益登、川湖、閎康"
+    },
+    "🟤 PCB/ABF載板": {
+        "stocks": ["3037","8046","4958","3044","2313","2368"],
+        "desc": "欣興、南電、臻鼎-KY、健鼎、華通、金像電"
+    },
+    "📦 封裝測試": {
+        "stocks": ["3711","6239","2449","6271","6510","6488"],
+        "desc": "日月光、力成、京元電子、同欣電、精測、環球晶"
+    },
+    "💾 記憶體/存儲": {
+        "stocks": ["2408","8299","2451","5274","3293"],
+        "desc": "南亞科、群聯、創見、信驊、鈊象"
+    },
+    "📡 網通/電子零組件": {
+        "stocks": ["6285","2301","2379","2376","3702","2327"],
+        "desc": "啟碁、光寶科、瑞昱、技嘉、大聯大、國巨"
+    },
+    "⚡ 電源/被動元件": {
+        "stocks": ["2308","2327","3577","2395"],
+        "desc": "台達電、國巨、中宇、研華"
+    },
+    "🏦 金融/銀行": {
+        "stocks": ["2881","2882","2884","2886","2891","5880","2892","2885"],
+        "desc": "富邦金、國泰金、玉山金、兆豐金、中信金"
+    },
+    "🚢 航運/物流": {
+        "stocks": ["2603","2609","2615","2610","2618"],
+        "desc": "長榮、陽明、萬海、華航、長榮航"
+    },
+    "🔋 電動車/綠能": {
+        "stocks": ["6488","2308","6415","3698"],
+        "desc": "環球晶、台達電、矽力-KY、隆達"
+    },
+}
+
+# 動態股票名稱快取（從市場數據更新，補全 ALL_STOCKS 沒有的股票名稱）
+_MARKET_NAMES = {}
+
+def nm(s):
+    """取得股票中文名稱（ALL_STOCKS > 市場數據 > 股號本身）"""
+    return ALL_STOCKS.get(s) or _MARKET_NAMES.get(s) or s
+
+def update_names_from_market(prices_dict):
+    """從 TWSE/TPEx 市場數據更新名稱快取"""
+    global _MARKET_NAMES
+    for sid, data in prices_dict.items():
+        n = data.get("name","")
+        if n and len(n) > 0 and sid not in ALL_STOCKS:
+            _MARKET_NAMES[sid] = n
+
+
 for k,v in [("token",""),("gemini_key",""),
-            ("stock_list","2330,2059,6669,2376,2454,3017,3034,6515,3293,3529,7769,8027"),
+            ("stock_list","2330,2454,6669,3661,3034,3017,3037,6515,5274,2376"),
             ("results",[]),("last_run",None),("disposed",set()),
             ("gemini_delisting",set()),("gemini_delisting_ts",None),
             ("cal_year",date.today().year),("cal_month",date.today().month),
-            ("cal_events",[]),("cal_events_ts",None)]:
+            ("cal_events",[]),("cal_events_ts",None),("scanner_sector",None)]:
     if k not in st.session_state: st.session_state[k] = v
 
 if not st.session_state.token:
@@ -323,19 +365,44 @@ def gemini_fetch_events(api_key, year, month):
         return _default_events(year, month)
 
 def _default_events(year, month):
-    """當 Gemini 未設定時的預設重要事件（涵蓋主要財經指標）"""
+    """當 Gemini 未設定時的預設重要事件（美股財報 + 台灣百大企業財報 + 主要財經數據）"""
     pfx = f"{year}-{month:02d}"
-    # 根據月份判斷哪些財報會在本月公布
-    q_earnings = {  # 近似財報月份
-        1:  ["Apple","Microsoft","Google","Meta","Tesla","台積電"],
+    # 美股財報月份
+    us_earnings = {
+        1:  ["Apple","Microsoft","Google","Meta","Tesla"],
         2:  ["NVIDIA","Amazon"],
-        4:  ["Apple","Microsoft","Google","Meta","Tesla","台積電","AMD"],
+        4:  ["Apple","Microsoft","Google","Meta","Tesla","AMD"],
         5:  ["NVIDIA"],
-        7:  ["Apple","Microsoft","Google","Meta","Tesla","台積電","AMD"],
+        7:  ["Apple","Microsoft","Google","Meta","Tesla","AMD"],
         8:  ["NVIDIA","Amazon"],
-        10: ["Apple","Microsoft","Google","Meta","Tesla","台積電"],
+        10: ["Apple","Microsoft","Google","Meta","Tesla"],
         11: ["NVIDIA"],
     }
+    # 台灣企業財報季：Q1截止5/15，Q2截止8/14，Q3截止11/14，全年截止3/31
+    tw_quarterly = {
+        3:  [("03-31","台灣上市公司全年財報截止","全體上市公司","neutral")],
+        4:  [("04-15","台積電Q1法說會","台積電(2330)","bullish"),
+             ("04-20","聯發科Q1財報","聯發科(2454)","neutral"),
+             ("04-25","鴻海Q1財報","鴻海(2317)","neutral")],
+        5:  [("05-15","台灣Q1財報截止","所有上市公司Q1季報截止","neutral"),
+             ("05-20","聯電/日月光Q1財報","聯電(2303)、日月光(3711)","neutral")],
+        7:  [("07-15","台積電Q2法說會","台積電(2330)，AI需求展望最受關注","bullish"),
+             ("07-20","聯發科Q2財報","聯發科(2454)","neutral"),
+             ("07-25","鴻海Q2財報","鴻海(2317)","neutral")],
+        8:  [("08-14","台灣Q2財報截止","所有上市公司Q2季報截止","neutral"),
+             ("08-15","廣達/緯創Q2財報","廣達(2382)、緯創(3231) AI伺服器展望","bullish")],
+        10: [("10-15","台積電Q3法說會","台積電(2330)，全年展望最關鍵","bullish"),
+             ("10-20","聯發科Q3財報","聯發科(2454)","neutral"),
+             ("10-22","鴻海Q3財報","鴻海(2317)","neutral"),
+             ("10-28","日月光Q3財報","日月光(3711) AI封測需求","neutral")],
+        11: [("11-14","台灣Q3財報截止","所有上市公司Q3季報截止","neutral"),
+             ("11-15","聯電/欣興Q3財報","聯電(2303)、欣興(3037)載板需求","neutral")],
+        1:  [("01-15","台積電Q4法說會","台積電(2330)，CoWoS/先進封裝展望","bullish"),
+             ("01-20","聯發科Q4財報","聯發科(2454) 天璣旗艦晶片展望","bullish"),
+             ("01-25","緯穎/廣達Q4財報","緯穎(6669)、廣達(2382) AI伺服器","bullish")],
+    }
+    # 根據月份判斷哪些財報會在本月公布
+    q_earnings = us_earnings
     is_earning_month = month in q_earnings
     events = [
         {"date":f"{pfx}-05","title":"美國非農就業",
@@ -371,19 +438,92 @@ def _default_events(year, month):
          "category":"美國總經","impact":"neutral","impact_zh":"中性",
          "reason":"PCE是Fed制定利率政策的核心參考數據"},
     ]
-    # 財報月份加入科技巨頭財報事件
-    if is_earning_month:
-        companies = q_earnings[month]
+    # 美股財報月份
+    is_us_earning_month = month in us_earnings
+    if is_us_earning_month:
+        companies = us_earnings[month]
         for i, co in enumerate(companies):
-            impact = "bullish" if co in ["台積電","NVIDIA","Apple"] else "neutral"
+            impact = "bullish" if co in ["NVIDIA","Apple"] else "neutral"
             events.append({
                 "date":f"{pfx}-{min(15+i*2, 28):02d}",
                 "title":f"{co} 財報公布",
                 "detail":f"{co} 季度財報及下季展望，市場高度關注",
                 "category":"企業財報",
                 "impact":impact,"impact_zh":"利多" if impact=="bullish" else "中性",
-                "reason":f"{co}財報影響AI/半導體族群，對台積電/鴻海等供應鏈有直接連動"
+                "reason":f"{co}財報影響AI/半導體族群，直接帶動台積電/日月光等供應鏈"
             })
+    # 台灣上市公司財報事件
+    if month in tw_quarterly:
+        for date_suffix, title, detail, impact in tw_quarterly[month]:
+            events.append({
+                "date":f"{year}-{date_suffix}",
+                "title":title,
+                "detail":detail,
+                "category":"台灣財報",
+                "impact":impact,
+                "impact_zh":"利多" if impact=="bullish" else "利空" if impact=="bearish" else "中性",
+                "reason":"台灣龍頭企業財報展望直接影響大盤及相關供應鏈走勢"
+            })
+    # ── 台灣固定截止日 ─────────────────────────────────────────
+    if month in TW_DEADLINES:
+        day, title, detail = TW_DEADLINES[month]
+        events.append({
+            "date": f"{pfx}-{day:02d}",
+            "title": title,
+            "detail": detail,
+            "category": "台灣財經",
+            "impact": "neutral",
+            "impact_zh": "中性",
+            "reason": "財報截止前，財報優於預期者股價走強，財報地雷則急跌"
+        })
+
+    # 月營收（每月10日）
+    events.append({
+        "date": f"{pfx}-10",
+        "title": "台灣月營收公布",
+        "detail": "全台上市上櫃公司公布上個月月營收，是台股最重要先行指標",
+        "category": "台灣財經",
+        "impact": "neutral",
+        "impact_zh": "中性",
+        "reason": "月營收YoY/MoM優於預期者飆漲，弱於預期者下殺，科技股影響最大"
+    })
+
+    # 台積電法說會
+    if month in TSMC_MONTHS:
+        events.append({
+            "date": f"{pfx}-18",
+            "title": "台積電法說會",
+            "detail": f"台積電{['一','二','三','四','五','六','七','八','九','十','十一','十二'][month-1]}月季度業績說明會，全球半導體業風向球",
+            "category": "企業財報",
+            "impact": "bullish",
+            "impact_zh": "利多",
+            "reason": "台積電展望直接牽動整體台股與AI供應鏈族群，是全年最重要的單一事件"
+        })
+
+    # 聯發科法說會
+    if month in MTEK_MONTHS:
+        events.append({
+            "date": f"{pfx}-12",
+            "title": "聯發科法說會",
+            "detail": "聯發科季度業績說明會，IC設計族群景氣指標",
+            "category": "企業財報",
+            "impact": "bullish",
+            "impact_zh": "利多",
+            "reason": "聯發科展望影響IC設計族群（聯詠、瑞昱等），連動智慧手機與AIoT景氣"
+        })
+
+    # 鴻海/台系EMS法說
+    if month in FOX_MONTHS:
+        events.append({
+            "date": f"{pfx}-20",
+            "title": "鴻海/台系EMS法說",
+            "detail": "鴻海、廣達、緯創等EMS廠季度法說，AI伺服器訂單動向",
+            "category": "企業財報",
+            "impact": "bullish",
+            "impact_zh": "利多",
+            "reason": "AI伺服器訂單能見度決定整體ODM族群走勢"
+        })
+
     for e in events:
         e["_month"] = f"{year}-{month:02d}"
     return events
@@ -877,10 +1017,43 @@ def analyze(sid,token,disposed,full_delivery,delisting,gemini_del,force=False):
 # ─────────────────────────────────────────────────────────────
 # 全市場掃描
 # ─────────────────────────────────────────────────────────────
+def compute_sector_analysis(insts, prices, hard_risk, disposed):
+    """按產業彙整法人買賣超，回傳產業排行。"""
+    sector_results = []
+    for sector_name, sector_info in SECTOR_MAP.items():
+        buying = []; total_f = 0; total_t = 0
+        for sid in sector_info["stocks"]:
+            if sid in hard_risk: continue
+            inst = insts.get(sid); pdata = prices.get(sid)
+            if not inst or not pdata: continue
+            f=inst.get("f",0); t=inst.get("t",0)
+            vol=pdata.get("volume",0) or 1; price=pdata.get("price",0)
+            chg=pdata.get("chg_pct",0) or 0
+            total_f+=f; total_t+=t
+            buying.append({"sid":sid,"name":nm(sid),"f":f,"t":t,"price":price,
+                           "chg":chg,"vol":vol,"ab":round((f+t)/vol*100,1) if vol>0 else 0,
+                           "tag":"⏱" if sid in disposed else ""})
+        buying.sort(key=lambda x:x["ab"],reverse=True)
+        total=total_f+total_t
+        if total!=0 or buying:
+            sector_results.append({
+                "name": sector_name,
+                "short": sector_name.split(" ",1)[1] if " " in sector_name else sector_name,
+                "desc": sector_info["desc"],
+                "total_f": total_f, "total_t": total_t, "total": total,
+                "stocks": buying,
+                "active": sum(1 for s in buying if s["f"]>0 or s["t"]>0),
+            })
+    sector_results.sort(key=lambda x:x["total"],reverse=True)
+    return sector_results
+
+
 def run_scanner():
     _qdate = get_institution_query_date_str()
     twse_p=fetch_twse_prices_all(); twse_i=fetch_twse_institution_all(_qdate)
     tpex_p=fetch_tpex_prices_all(); tpex_i=fetch_tpex_institution_all(_qdate)
+    # 更新動態名稱快取（補全不在 ALL_STOCKS 的股票名稱）
+    update_names_from_market({**twse_p, **tpex_p})
     disposed=fetch_disposed_cached(); full_del=fetch_full_delivery_cached()
     delisting=fetch_delisting_cached(); gemini_del=st.session_state.gemini_delisting
     hard_risk=full_del|delisting|gemini_del
@@ -1200,58 +1373,199 @@ def build_full_html(results):
 # ─────────────────────────────────────────────────────────────
 # 頁面
 # ─────────────────────────────────────────────────────────────
+def _show_sector_overview(prices, insts, hard_risk, disposed):
+    """產業籌碼概況表（主視圖）"""
+    has_inst = len(insts) > 0
+    sort_opts = ["📊 今日均漲跌幅", "💰 法人合計買超"]
+    sort_key = st.radio("排序", sort_opts, horizontal=True, label_visibility="collapsed")
+
+    sector_rows = []
+    for sec_name, info in SECTOR_MAP.items():
+        sids = [s for s in info["stocks"] if s in prices and s not in hard_risk]
+        if not sids: continue
+        changes = [prices[s].get("chg_pct", 0) or 0 for s in sids]
+        avg_chg = round(sum(changes) / len(changes), 2) if changes else 0.0
+        up = sum(1 for c in changes if c > 0)
+        dn = sum(1 for c in changes if c < 0)
+        net_inst = sum(
+            (insts.get(s, {}).get("f", 0) or 0) + (insts.get(s, {}).get("t", 0) or 0)
+            for s in sids)
+        top_sid = max(sids, key=lambda s: prices[s].get("chg_pct", 0) or 0)
+        top_chg = prices[top_sid].get("chg_pct", 0) or 0
+        sector_rows.append({
+            "name": sec_name,
+            "info": info,
+            "count": len(sids),
+            "avg_chg": avg_chg,
+            "up": up,
+            "dn": dn,
+            "net_inst": net_inst,
+            "top": f"{nm(top_sid)} {top_chg:+.1f}%",
+        })
+
+    if sort_key == "📊 今日均漲跌幅":
+        sector_rows.sort(key=lambda x: x["avg_chg"], reverse=True)
+    else:
+        sector_rows.sort(key=lambda x: x["net_inst"], reverse=True)
+
+    if not has_inst:
+        st.caption("⚠️ 法人T86數據今日未取得（假日/盤後未更新），顯示今日漲跌概況")
+
+    for row in sector_rows:
+        chg = row["avg_chg"]
+        chg_clr = "#27ae60" if chg >= 0 else "#e74c3c"
+        chg_sign = "+" if chg >= 0 else ""
+        inst_net = row["net_inst"]
+        inst_html = ""
+        if has_inst:
+            inst_clr = "#27ae60" if inst_net >= 0 else "#e74c3c"
+            inst_html = f'<span style="color:{inst_clr};font-size:11px">法人{inst_net:+,}張</span>'
+
+        c1, c2, c3, c4 = st.columns([3, 2, 2, 1])
+        with c1:
+            st.markdown(
+                f'<div style="font-size:14px;font-weight:700;color:#e8eaf0">{row["name"]}</div>'
+                f'<div style="font-size:11px;color:#8fa3b8">{row["info"]["desc"]}</div>'
+                f'<div style="font-size:11px;color:#8fa3b8">↑{row["up"]} ↓{row["dn"]} 共{row["count"]}支</div>',
+                unsafe_allow_html=True)
+        with c2:
+            st.markdown(
+                f'<div style="font-size:22px;font-weight:700;color:{chg_clr};padding:4px 0">'
+                f'{chg_sign}{chg:.1f}%</div>',
+                unsafe_allow_html=True)
+        with c3:
+            st.markdown(
+                f'<div style="padding:8px 0;font-size:12px;color:#8fa3b8">'
+                f'🏆 {row["top"]}<br>{inst_html}</div>',
+                unsafe_allow_html=True)
+        with c4:
+            if st.button("查看→", key=f"sec_{row['name']}", use_container_width=True):
+                st.session_state.scanner_sector = row["name"]
+                st.rerun()
+        st.divider()
+
+
+def _show_sector_detail(sector_name, prices, insts, hard_risk, disposed):
+    """產業個股詳情（點選後展開）"""
+    info = SECTOR_MAP.get(sector_name, {})
+    c_back, c_title = st.columns([1, 5])
+    with c_back:
+        if st.button("⬅ 返回", use_container_width=True):
+            st.session_state.scanner_sector = None
+            st.rerun()
+    with c_title:
+        st.markdown(f"### {sector_name}")
+        st.caption(info.get("desc", ""))
+
+    sids = info.get("stocks", [])
+    rows = []
+    for sid in sids:
+        p = prices.get(sid)
+        if not p: continue
+        inst = insts.get(sid, {})
+        chg = p.get("chg_pct", 0) or 0
+        f_net = inst.get("f", 0) or 0
+        t_net = inst.get("t", 0) or 0
+        tag = "⏱" if sid in disposed else ("⚠️" if sid in hard_risk else "")
+        rows.append({
+            "⚠": tag,
+            "代號": sid,
+            "名稱": nm(sid),
+            "收盤(元)": p.get("price", 0),
+            "漲跌%": round(chg, 2),
+            "外資(張)": f_net,
+            "投信(張)": t_net,
+            "法人合計": f_net + t_net,
+        })
+
+    if rows:
+        rows.sort(key=lambda x: x["漲跌%"], reverse=True)
+        df = pd.DataFrame(rows)
+        st.dataframe(df, use_container_width=True, hide_index=True)
+
+        avg_chg = round(sum(r["漲跌%"] for r in rows) / len(rows), 2)
+        total_inst = sum(r["法人合計"] for r in rows)
+        up_cnt = sum(1 for r in rows if r["漲跌%"] > 0)
+        cc1, cc2, cc3 = st.columns(3)
+        chg_s = "+" if avg_chg >= 0 else ""
+        cc1.metric("平均漲跌", f"{chg_s}{avg_chg:.1f}%")
+        if total_inst != 0:
+            cc2.metric("法人合計", f"{total_inst:+,}張")
+        else:
+            cc2.metric("法人合計", "今日未取得")
+        cc3.metric("上漲/下跌", f"{up_cnt}/{len(rows)-up_cnt}")
+    else:
+        st.info("此產業個股今日暫無數據")
+
+
 def tab_scanner():
-    st.markdown("### 📡 籌碼掃描 — 全市場（上市＋上櫃，免Token）")
-    c1,c2,c3=st.columns(3)
-    c1.info("🆓 免費，無需 Token"); c2.info("⏱ 自動找最近交易日"); c3.info("🤖 Gemini偵測下市股")
-    if st.button("🔄 重新整理全市場數據",use_container_width=True):
-        for fn in [fetch_twse_prices_all,fetch_twse_institution_all,
-                   fetch_tpex_prices_all,fetch_tpex_institution_all,
-                   fetch_disposed_cached,fetch_full_delivery_cached,fetch_delisting_cached]:
-            fn.clear()
-        st.session_state.gemini_delisting=set(); st.session_state.gemini_delisting_ts=None
-        st.rerun()
-    gkey=st.session_state.gemini_key
+    st.markdown("### 📡 籌碼掃描 — 全市場產業分析（免Token）")
+
+    c1, c2, c3 = st.columns(3)
+    c1.info("🆓 免費，無需 Token")
+    c2.info("📊 依產業彙整籌碼")
+    c3.info("🤖 Gemini偵測下市股")
+
+    # 重新整理按鈕
+    col_refresh, col_back = st.columns([3, 1])
+    with col_refresh:
+        if st.button("🔄 重新整理全市場數據", use_container_width=True):
+            for fn in [fetch_twse_prices_all, fetch_twse_institution_all,
+                       fetch_tpex_prices_all, fetch_tpex_institution_all,
+                       fetch_disposed_cached, fetch_full_delivery_cached, fetch_delisting_cached]:
+                fn.clear()
+            st.session_state.gemini_delisting = set()
+            st.session_state.gemini_delisting_ts = None
+            st.session_state.scanner_sector = None
+            st.rerun()
+    with col_back:
+        if st.session_state.get("scanner_sector"):
+            if st.button("⬅ 返回產業列表", use_container_width=True):
+                st.session_state.scanner_sector = None
+                st.rerun()
+
+    # 取得數據
+    _qdate = get_institution_query_date_str()
+    with st.spinner("📡 取得全市場數據..."):
+        twse_p = fetch_twse_prices_all()
+        tpex_p = fetch_tpex_prices_all()
+        prices = {**twse_p, **tpex_p}
+        update_names_from_market(prices)
+        twse_i = fetch_twse_institution_all(_qdate)
+        tpex_i = fetch_tpex_institution_all(_qdate)
+        insts = {**twse_i, **tpex_i}
+        disposed = fetch_disposed_cached()
+        full_del = fetch_full_delivery_cached()
+        delisting = fetch_delisting_cached()
+        hard_risk = full_del | delisting | st.session_state.gemini_delisting
+
+    # Gemini 下市偵測
+    gkey = st.session_state.gemini_key
     if gkey:
-        with st.spinner("🤖 Gemini 偵測下市風險股票..."): g_del=gemini_fetch_delisting(gkey)
-        if g_del: st.warning(f"🤖 Gemini 偵測到 {len(g_del)} 支下市風險股：{', '.join(sorted(g_del)[:10])}")
-    with st.spinner("📡 取得全市場數據..."): hot,trust,launch,inst_date,n_p,n_i=run_scanner()
-    # 顯示實際查詢的法人日期與時間說明
+        with st.spinner("🤖 Gemini 偵測下市風險股票..."):
+            g_del = gemini_fetch_delisting(gkey)
+        if g_del:
+            st.warning(f"🤖 Gemini 偵測到 {len(g_del)} 支下市風險股：{', '.join(sorted(g_del)[:10])}")
+
+    # 時間說明
     inst_query_date = get_institution_query_date()
     now_tw = datetime.utcnow() + timedelta(hours=8)
     before5pm = now_tw.hour < 17
-    time_note = "（盤後數據尚未出，顯示昨日資料）" if before5pm else "（顯示今日盤後資料）"
-    st.caption(f"資料：{inst_query_date.strftime('%Y/%m/%d')} {time_note} | 股價：{n_p} 檔 | 法人：{n_i} 檔")
-    if n_i==0:
-        if before5pm:
-            st.warning("⏰ 現在是下午5點前，法人盤後數據尚未公布。系統已嘗試讀取昨日數據，若今天為週一則會讀取上週五資料。")
-        else:
-            st.error("⚠️ 法人數據暫無法取得（可能是假日或 TWSE 尚未更新，請下午3點後重試）")
+    time_note = "（盤後未出，顯示昨日）" if before5pm else "（今日盤後）"
+    inst_info = f"法人：{len(insts)} 檔" if insts else "法人：今日未取得（不影響產業漲跌顯示）"
+    st.caption(f"股價：{len(prices)} 檔 | {inst_info} | {inst_query_date.strftime('%Y/%m/%d')} {time_note}")
+
+    if not prices:
+        st.error("⚠️ 無法取得股價數據，請重新整理")
         return
-    st.markdown(f"#### 🔥 策略一：法人焦點熱門股（{len(hot)} 檔）")
-    st.caption("外資+投信同向買超，吸籌率≥5%，已排除全額交割/下市警告股")
-    if hot:
-        df=pd.DataFrame([{"熱度":r["tier"],"代號":r["sid"],"名稱":r["name"][:8],"⚠":r["tag"],
-                          "收盤":r["price"],"漲跌%":f"{r['chg']:+.1f}%",
-                          "外資(張)":f"+{r['f']:,}","投信(張)":f"+{r['t']:,}","吸籌率":f"{r['ab']:.1f}%"} for r in hot])
-        st.dataframe(df,use_container_width=True,hide_index=True,height=min(35*len(hot)+40,460))
-    else: st.info("今日無符合條件個股")
-    st.markdown("---")
-    st.markdown(f"#### ⚡ 策略三：主力首日發動（{len(launch)} 檔）")
-    if launch:
-        df=pd.DataFrame([{"代號":r["sid"],"名稱":r["name"][:8],"⚠":r["tag"],"收盤":r["price"],
-                          "漲跌%":f"{r['chg']:+.1f}%","今日投信":f"+{r['t']:,}張",
-                          "金額":f"{r['val_yi']:.2f}億","外資":f"{r['f']:+,}張"} for r in launch])
-        st.dataframe(df,use_container_width=True,hide_index=True)
-    else: st.info("今日無投信突破500張的首日發動個股")
-    st.markdown("---")
-    st.markdown(f"#### 🕵️ 策略二：投信暗中佈局（{len(trust)} 檔）")
-    if trust:
-        df=pd.DataFrame([{"代號":r["sid"],"名稱":r["name"][:8],"現價":r["price"],
-                          "漲跌%":f"{r.get('chg',0):+.1f}%","5日買超天數":f"{r['buy_days']}/5天",
-                          "累計(張)":f"+{r['t_total']:,}"} for r in trust])
-        st.dataframe(df,use_container_width=True,hide_index=True)
-    else: st.info("請先在「🔍 個股分析」執行分析，結果將自動出現在此")
+
+    # 顯示主視圖
+    if not st.session_state.get("scanner_sector"):
+        st.markdown("#### 📊 產業籌碼彙整（點選「查看→」可展開個股）")
+        _show_sector_overview(prices, insts, hard_risk, disposed)
+    else:
+        _show_sector_detail(st.session_state.scanner_sector, prices, insts, hard_risk, disposed)
+
 
 
 def tab_analysis():
