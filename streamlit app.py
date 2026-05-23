@@ -593,19 +593,15 @@ body{background:#1a2332;color:#e8eaf0;font-family:'Helvetica Neue',Arial,sans-se
 @st.cache_data(ttl=86400)
 def fetch_official_sectors(token: str = "") -> dict:
     mapping = {}
-    fallback_map = {
+    mapping.update({
         "2330": "半導體", "2303": "半導體", "2454": "半導體", "5347": "半導體", "3711": "半導體",
-        "2317": "電腦及週邊設備", "2382": "電腦及週邊設備", "3231": "電腦及週邊設備", "2356": "電腦及週邊設備", 
+        "2317": "其他電子", "2382": "電腦及週邊設備", "3231": "電腦及週邊設備", "2356": "電腦及週邊設備", 
         "6669": "電腦及週邊設備", "2376": "電腦及週邊設備",
         "2327": "電子零組件", "2308": "電子零組件", "3037": "電子零組件",
         "2603": "航運", "2609": "航運", "2615": "航運",
         "2881": "金融保險", "2891": "金融保險",
         "3105": "半導體", "6770": "半導體"
-    }
-    mapping.update({
-    "2330": "半導體",
-    "2454": "半導體",
-    "2317": "其他電子"})
+    })
     def clean_name(name):
         return name.replace("工業", "").replace("業", "") if len(name) > 2 else name
 
@@ -621,13 +617,11 @@ def fetch_official_sectors(token: str = "") -> dict:
                     code = str(item.get("stock_id", "")).strip()
                     ind  = str(item.get("industry_category", "")).strip()
                     if code and ind and ind not in ("None", ""):
-                        ind = str(ind)
-                        code = str(code)
                         mapping[code] = clean_name(ind)
         except Exception:
             pass
 
-    if mapping:
+    if len(mapping) > 100:
         return mapping  # FinMind 成功則直接回傳
 
     # 2. Fallback：TWSE
@@ -640,8 +634,6 @@ def fetch_official_sectors(token: str = "") -> dict:
                 code = str(item.get("公司代號", "")).strip()
                 ind  = str(item.get("產業類別", "")).strip()
                 if code and ind:
-                    ind = str(ind)
-                    code = str(code)
                     mapping[code] = clean_name(ind)
     except Exception:
         pass
