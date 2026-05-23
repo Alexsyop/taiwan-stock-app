@@ -1590,7 +1590,7 @@ def tab_analysis():
                 save_results_cache(st.session_state.results); st.success("✅ 已更新"); st.rerun()
             else: st.error(f"❌ {err}")
     html = "<body style='background:#1a2332;color:#fff;'>暫無行事曆資料</body>"
-    st.iframe(html,height=2700,scrolling=True)
+    sst.iframe(src=f"data:text/html;charset=utf-8,{requests.utils.quote(html)}", height=2700)
 
 def tab_calendar():
     st.markdown("### 📅 財經行事曆")
@@ -1640,7 +1640,7 @@ def tab_calendar():
     co3.metric("🔴 利空",bear_cnt); co4.metric("⚪ 中性",len(events)-bull_cnt-bear_cnt)
     try:
         cal_html=build_calendar_html(events,st.session_state.cal_year,st.session_state.cal_month)
-        st.iframe(cal_html,height=1250,scrolling=True)
+        st.iframe(src=f"data:text/html;charset=utf-8,{requests.utils.quote(html)}", height=2700)
     except Exception as e:
         st.error(f"月曆渲染失敗：{e}")
         pfx=f"{st.session_state.cal_year}-{st.session_state.cal_month:02d}"
