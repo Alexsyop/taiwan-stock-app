@@ -95,7 +95,7 @@ VTC = {"S":"#a8e6bb","A":"#a8e6bb","B":"#fae0a8","C":"#f7c1c1"}
 # ── Session state ─────────────────────────────────────────────
 _SS_DEFAULTS = [
     ("token",""), ("gemini_key",""),
-    ("stock_list","2330,2454,6669,3661,3034,3017,3037,6515,5274,2376"),
+    ("stock_list","2330,6669,3037,6515,1432,2059,2376,2454,3017,3034,3293,3529,7769,8027"),
     ("results",[]), ("last_run",None), ("disposed",set()),
     ("gemini_delisting",set()), ("gemini_delisting_ts",None),
     ("cal_year",date.today().year), ("cal_month",date.today().month),
