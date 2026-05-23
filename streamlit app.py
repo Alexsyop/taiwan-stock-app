@@ -709,12 +709,18 @@ def fetch_twse_prices_all():
                 sid=str(item.get("Code","")).strip()
                 if not sid or not sid.isdigit(): continue
                 p=ff(str(item.get("ClosingPrice","0")).replace(",",""))
-                v=fi(str(item.get("TradeVolume","0")).replace(",",""))
+                v = fi(str(item.get("TradeVolume", "0")).replace(",", "")) // 1000
                 chg=ff(str(item.get("Change","")).replace("+","").replace(",",""))
-                prev=p-chg if p else None; cp=round(chg/prev*100,2) if prev and prev>0 else 0.0
-                if p>0 and v>0:
+                prev=p-chg if p else None; 
+                cp=round(chg/prev*100,2) if prev and prev>0 else 0.0
+                if p > 0 and v > 0:
                     out[sid]={"price":p,"volume":v,"chg_pct":cp,"name":str(item.get("Name","")).strip()}
-    except Exception: pass
+        else:
+            # 🚨 顯示 API 拒絕連線的狀態碼
+            st.error(f"上市報價 API 異常，狀態碼：{r.status_code}。可能是證交所阻擋了請求。")
+    except Exception as e:
+        # 🚨 如果連線逾時或發生錯誤，直接顯示在畫面上
+        st.error(f"上市報價 API 連線失敗：{e}")
     return out
 
 @st.cache_data(ttl=14400)
