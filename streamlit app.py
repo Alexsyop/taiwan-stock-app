@@ -602,7 +602,10 @@ def fetch_official_sectors(token: str = "") -> dict:
         "2881": "金融保險", "2891": "金融保險",
         "3105": "半導體", "6770": "半導體"
     }
-    mapping.update(fallback_map)
+    mapping.update({
+    "2330": "半導體",
+    "2454": "半導體",
+    "2317": "其他電子"})
     def clean_name(name):
         return name.replace("工業", "").replace("業", "") if len(name) > 2 else name
 
