@@ -705,16 +705,38 @@ def fetch_twse_prices_all():
     try:
         r=requests.get("https://openapi.twse.com.tw/v1/exchangeReport/STOCK_DAY_ALL",headers=HDR,timeout=20,verify=False)
         if r.status_code==200:
-            for item in r.json():
-                sid=str(item.get("Code","")).strip()
-                if not sid or not sid.isdigit(): continue
-                p=ff(str(item.get("ClosingPrice","0")).replace(",",""))
+            # for item in r.json():
+            #     sid=str(item.get("Code","")).strip()
+            #     if not sid or not sid.isdigit(): continue
+            #     p=ff(str(item.get("ClosingPrice","0")).replace(",",""))
+            #     v = fi(str(item.get("TradeVolume", "0")).replace(",", "")) // 1000
+            #     chg=ff(str(item.get("Change","")).replace("+","").replace(",",""))
+            #     prev=p-chg if p else None; 
+            #     cp=round(chg/prev*100,2) if prev and prev>0 else 0.0
+            #     if p > 0 and v > 0:
+            #         out[sid]={"price":p,"volume":v,"chg_pct":cp,"name":str(item.get("Name","")).strip()}
+            # 💡 在這裡加上保護機制，嘗試解析 JSON
+            try:
+                data = r.json() 
+            except Exception:
+                # 如果解析失敗，就把證交所真實回傳的前 100 個字元印出來看
+                st.error(f"上市 API 異常：證交所沒有回傳 JSON 資料。回傳內容片段：{r.text[:100]}")
+                return out
+
+            for item in data:
+                sid = str(item.get("Code", "")).strip()
+                if not sid or not sid.isdigit(): 
+                    continue
+                
+                p = ff(str(item.get("ClosingPrice", "0")).replace(",", ""))
                 v = fi(str(item.get("TradeVolume", "0")).replace(",", "")) // 1000
-                chg=ff(str(item.get("Change","")).replace("+","").replace(",",""))
-                prev=p-chg if p else None; 
-                cp=round(chg/prev*100,2) if prev and prev>0 else 0.0
+                chg = ff(str(item.get("Change", "")).replace("+", "").replace(",", ""))
+                
+                prev = p - chg if p else None
+                cp = round(chg / prev * 100, 2) if prev and prev > 0 else 0.0
+                
                 if p > 0 and v > 0:
-                    out[sid]={"price":p,"volume":v,"chg_pct":cp,"name":str(item.get("Name","")).strip()}
+                    out[sid] = {"price": p, "volume": v, "chg_pct": cp, "name": str(item.get("Name", "")).strip()}
         else:
             # 🚨 顯示 API 拒絕連線的狀態碼
             st.error(f"上市報價 API 異常，狀態碼：{r.status_code}。可能是證交所阻擋了請求。")
