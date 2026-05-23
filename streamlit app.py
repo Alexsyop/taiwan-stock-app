@@ -1589,6 +1589,7 @@ def tab_analysis():
                 if idx is not None: st.session_state.results[idx]=new_r
                 save_results_cache(st.session_state.results); st.success("✅ 已更新"); st.rerun()
             else: st.error(f"❌ {err}")
+    html = "<body style='background:#1a2332;color:#fff;'>暫無行事曆資料</body>"
     st.iframe(src=f"data:text/html;charset=utf-8,{requests.utils.quote(html)}", height=800)
 
 def tab_calendar():
