@@ -591,44 +591,61 @@ body{background:#1a2332;color:#e8eaf0;font-family:'Helvetica Neue',Arial,sans-se
 
 # ── 官方產業分類快取 ──────────────────────────────────────────
 @st.cache_data(ttl=86400)
-def fetch_official_sectors() -> dict:
-    """
-    回傳 { "股號": "官方產業名稱" }，涵蓋上市與上櫃。
-    快取 24 小時（產業分類極少異動）。
-    上市來源：TWSE t187ap03_L（欄位：公司代號、產業類別）
-    上櫃來源：TPEx tpex_listed_companies（欄位：SecuritiesCompanyCode、Industry）
-    """
-    mapping: dict = {}
+def fetch_official_sectors(token: str = "") -> dict:
+    mapping = {}
 
-    # ── 上市（TWSE）────────────────────────────────────────────
+    def clean_name(name):
+        return name.replace("工業", "").replace("業", "") if len(name) > 2 else name
+
+    # 1. 優先使用 FinMind（最穩定，且包含興櫃產業）
+    if token:
+        try:
+            r = requests.get(
+                FINMIND_API,
+                params={"dataset": "TaiwanStockInfo", "token": token},
+                headers=HDR, timeout=25, verify=False)
+            if r.status_code == 200:
+                for item in r.json().get("data", []):
+                    code = str(item.get("stock_id", "")).strip()
+                    ind  = str(item.get("industry_category", "")).strip()
+                    if code and ind and ind not in ("None", ""):
+                        mapping[code] = clean_name(ind)
+        except Exception:
+            pass
+
+    if mapping:
+        return mapping  # FinMind 成功則直接回傳
+
+    # 2. Fallback：TWSE
     try:
         r = requests.get(
             "https://openapi.twse.com.tw/v1/opendata/t187ap03_L",
             headers=HDR, timeout=25, verify=False)
         if r.status_code == 200:
             for item in r.json():
-                code = str(item.get("公司代號","")).strip()
-                ind  = str(item.get("產業類別","")).strip()
+                code = str(item.get("公司代號", "")).strip()
+                ind  = str(item.get("產業類別", "")).strip()
                 if code and ind:
-                    mapping[code] = ind
+                    mapping[code] = clean_name(ind)
     except Exception:
         pass
 
-    # ── 上櫃（TPEx）────────────────────────────────────────────
+    # 3. Fallback：TPEx
     try:
         r = requests.get(
             "https://www.tpex.org.tw/openapi/v1/tpex_listed_companies",
             headers=HDR, timeout=25, verify=False)
         if r.status_code == 200:
             for item in r.json():
-                code = str(item.get("SecuritiesCompanyCode","")).strip()
-                ind  = str(item.get("Industry","")).strip()
+                code = str(item.get("SecuritiesCompanyCode", "")).strip()
+                ind  = str(item.get("Industry", "")).strip()
                 if code and ind:
-                    mapping[code] = ind
+                    mapping[code] = clean_name(ind)
     except Exception:
         pass
 
     return mapping
+
 
 @st.cache_data(ttl=3600)
 def fetch_disposed_cached():
@@ -1348,7 +1365,8 @@ def tab_scanner():
         delist    = fetch_delisting_cached()
         hard_risk = full_del | delist | st.session_state.gemini_delisting
         # ── 官方產業分類（24 小時快取，幾乎不消耗時間）────────
-        sector_mapping = fetch_official_sectors()
+        token = st.session_state.get("token", "")
+        sector_mapping = fetch_official_sectors(token)
     gkey=st.session_state.gemini_key
     if gkey:
         with st.spinner("🤖 偵測下市風險股..."):
@@ -1362,6 +1380,9 @@ def tab_scanner():
     sec_note = f"產業：{len(sector_mapping)} 種官方分類" if sector_mapping else "產業分類：載入中"
     st.caption(f"股價：{len(prices)} 檔 | {inst_note} | {sec_note} | {time_note}")
     if not prices: st.error("⚠️ 無法取得股價數據"); return
+    if not sector_mapping:
+        st.warning("⚠️ 無法取得產業分類資料，請確認網路或 FinMind Token 設定，稍後再試。")
+
     stats = compute_sector_stats(prices, insts, hard_risk, sector_mapping)
     if not st.session_state.get("scanner_sector"):
         # ── 第一層：強勢/弱勢概覽 ─────────────────────────────
