@@ -691,84 +691,30 @@ def fetch_delisting_cached():
 # ── 全市場數據 ────────────────────────────────────────────────
 @st.cache_data(ttl=14400)
 def fetch_twse_prices_all():
-    """
-    抓取上市全股股價。
-    主力：TWSE STOCK_DAY_ALL OpenAPI（免費，無需 Token）
-    備援：TWSE BWIBBU_ALL（含收盤價）
-    """
     out = {}
-
-    # ── 主來源：每日全部股票行情 ────────────────────────────────
-    for url in [
-        "https://openapi.twse.com.tw/v1/exchangeReport/STOCK_DAY_ALL",
-        "https://openapi.twse.com.tw/v1/exchangeReport/STOCK_DAY_ALL?response=json",
-    ]:
-        try:
-            r = requests.get(url, headers=HDR, timeout=25, verify=False)
-            if r.status_code != 200:
-                continue
-            data = r.json()
-            if not isinstance(data, list) or len(data) < 10:
-                continue
-            for item in data:
-                sid = str(item.get("Code", "")).strip()
-                if not sid or not sid.isdigit():
-                    continue
-                p   = ff(str(item.get("ClosingPrice",  "0")).replace(",", ""))
-                v   = fi(str(item.get("TradeVolume",   "0")).replace(",", ""))
-                chg = ff(str(item.get("Change", "")).replace("+", "").replace(",", ""))
-                if p <= 0:
-                    continue
-                prev = p - chg if p else None
-                cp   = round(chg / prev * 100, 2) if prev and prev > 0 else 0.0
-                out[sid] = {
-                    "price":   p,
-                    "volume":  v,
-                    "chg_pct": cp,
-                    "name":    str(item.get("Name", "")).strip(),
-                }
-            if len(out) > 200:
-                return out   # 成功
-        except Exception:
-            continue
-
-    # ── 備援：BWIBBU_ALL（本益比表，含收盤價）───────────────────
-    if len(out) < 50:
-        try:
-            r = requests.get(
-                "https://openapi.twse.com.tw/v1/exchangeReport/BWIBBU_ALL",
-                headers=HDR, timeout=25, verify=False)
-            if r.status_code == 200:
-                for item in r.json():
-                    sid = str(item.get("Code", "")).strip()
-                    if not sid or not sid.isdigit() or sid in out:
-                        continue
-                    p = ff(str(item.get("ClosingPrice", "0")).replace(",", ""))
-                    if p > 0:
-                        out[sid] = {
-                            "price":   p,
-                            "volume":  0,
-                            "chg_pct": 0.0,
-                            "name":    str(item.get("Name", "")).strip(),
-                        }
-        except Exception:
-            pass
-
+    try:
+        r=requests.get("https://openapi.twse.com.tw/v1/exchangeReport/STOCK_DAY_ALL",headers=HDR,timeout=20,verify=False)
+        if r.status_code==200:
+            for item in r.json():
+                sid=str(item.get("Code","")).strip()
+                if not sid or not sid.isdigit(): continue
+                p=ff(str(item.get("ClosingPrice","0")).replace(",",""))
+                v=fi(str(item.get("TradeVolume","0")).replace(",",""))
+                chg=ff(str(item.get("Change","")).replace("+","").replace(",",""))
+                prev=p-chg if p else None; cp=round(chg/prev*100,2) if prev and prev>0 else 0.0
+                if p>0 and v>0:
+                    out[sid]={"price":p,"volume":v,"chg_pct":cp,"name":str(item.get("Name","")).strip()}
+    except Exception: pass
     return out
 
 @st.cache_data(ttl=14400)
 def fetch_twse_institution_all(qdate=""):
     """
-    抓取上市三大法人買賣超。
-    TWSE T86 API 回傳欄位說明（共 18 欄）：
-      [0]  股號  [1] 股名
-      [2]  外資買  [3] 外資賣  [4] 外資淨
-      [5]  外資自營買  [6] 外資自營賣  [7] 外資自營淨
-      [8]  投信買  [9] 投信賣  [10] 投信淨
-      [11] 自營買(避)  [12] 自營賣(避)  [13] 自營淨(避)
-      [14] 自營買(自)  [15] 自營賣(自)  [16] 自營淨(自)
-      [17] 三大法人合計
-    外資淨=row[4], 投信淨=row[10], 自營合計淨=row[13]+row[16]（或直接 row[17] 拆）
+    上市三大法人買賣超。TWSE T86 欄位（新版18欄）：
+    [0]股號 [4]外資淨 [10]投信淨 [13]自營(避)淨 [16]自營(自)淨
+    舊版8欄：[4]外資淨 [7]投信淨
+    ★ 移除 stat 字串判斷，改用「rows 有資料」判斷成功。
+    ★ 依實際欄數自動選擇索引。
     """
     out = {}
     for trade_date in last_trading_days(5):
@@ -776,50 +722,40 @@ def fetch_twse_institution_all(qdate=""):
         urls = [
             f"https://www.twse.com.tw/rwd/zh/fund/T86?response=json&date={ds}&selectType=ALL",
             f"https://www.twse.com.tw/fund/T86?response=json&date={ds}&selectType=ALL",
-            f"https://www.twse.com.tw/rwd/en/fund/T86?response=json&date={ds}&selectType=ALL",
         ]
         for url in urls:
             try:
                 r = requests.get(url, headers=HDR, timeout=25, verify=False)
-                if r.status_code != 200:
-                    continue
+                if r.status_code != 200: continue
                 d = r.json()
-                # stat 可能是 "OK" / "ok" / "200" / 或直接沒有這欄位
-                # 只要 data 有東西就接受
                 rows = d.get("data", d.get("Data", []))
-                if not rows or len(rows) < 5:
-                    continue
+                if not rows or len(rows) < 5: continue
                 parsed = 0
                 for row in rows:
-                    if len(row) < 11:
-                        continue
+                    if len(row) < 5: continue
                     sid = str(row[0]).strip()
-                    if not sid or not sid.isdigit():
-                        continue
-                    # 外資淨 = row[4]（若欄數不足則退回 row[7]）
-                    if len(row) >= 18:
+                    if not sid or not sid.isdigit(): continue
+                    ncols = len(row)
+                    if ncols >= 18:
                         f_net = parse_tw(row[4])
                         t_net = parse_tw(row[10])
                         d_net = parse_tw(row[13]) + parse_tw(row[16])
-                    elif len(row) >= 11:
-                        # 舊格式 fallback
-                        f_net = parse_tw(row[7]) if len(row) > 7 else 0
-                        t_net = parse_tw(row[10])
-                        d_net = parse_tw(row[14]) if len(row) > 14 else 0
+                    elif ncols >= 11:
+                        f_net = parse_tw(row[4])
+                        t_net = parse_tw(row[7])
+                        d_net = parse_tw(row[10])
+                    elif ncols >= 8:
+                        f_net = parse_tw(row[4])
+                        t_net = parse_tw(row[7])
+                        d_net = 0
                     else:
                         continue
-                    out[sid] = {
-                        "f": f_net // 1000,
-                        "t": t_net // 1000,
-                        "d": d_net // 1000,
-                    }
+                    out[sid] = {"f": f_net // 1000, "t": t_net // 1000, "d": d_net // 1000}
                     parsed += 1
                 if parsed > 100:
-                    return out   # 成功取得足夠資料，直接回傳
-            except Exception:
-                continue
-        if len(out) > 100:
-            break
+                    return out
+            except Exception: continue
+        if len(out) > 100: break
     return out
 
 @st.cache_data(ttl=14400)
@@ -858,6 +794,60 @@ def fetch_tpex_institution_all(qdate=""):
             if len(out)>50: return out
         except Exception: continue
     return out
+
+# ── FinMind 批次法人（籌碼掃描備援） ─────────────────────────
+@st.cache_data(ttl=14400)
+def fetch_finmind_institution_all(token: str, qdate: str = "") -> dict:
+    """
+    用 FinMind TaiwanStockInstitutionalInvestorsBuySell 批次抓全市場法人。
+    一次呼叫回傳整個交易日所有股票，不需要逐筆迴圈。
+    只在 token 存在時啟用；無 token 回傳空 dict。
+    """
+    if not token:
+        return {}
+    # 取最近一個交易日
+    now_tw = datetime.utcnow() + timedelta(hours=8)
+    if not qdate:
+        d = (now_tw.date() - timedelta(days=1)) if now_tw.hour < 17 else now_tw.date()
+        while d.weekday() >= 5:
+            d -= timedelta(days=1)
+        qdate = d.strftime("%Y-%m-%d")
+    else:
+        # 把 %Y%m%d 轉成 %Y-%m-%d
+        if len(qdate) == 8 and "-" not in qdate:
+            qdate = f"{qdate[:4]}-{qdate[4:6]}-{qdate[6:]}"
+    try:
+        r = requests.get(
+            FINMIND_API,
+            params={"dataset": "TaiwanStockInstitutionalInvestorsBuySell",
+                    "start_date": qdate, "end_date": qdate, "token": token},
+            headers=HDR, timeout=30, verify=False,
+        )
+        if r.status_code != 200:
+            return {}
+        rows = r.json().get("data", [])
+        if not rows:
+            return {}
+        dm: dict = {}
+        for row in rows:
+            sid = str(row.get("stock_id", "")).strip()
+            if not sid or not sid.isdigit():
+                continue
+            name = str(row.get("name", ""))
+            net  = fi(row.get("buy", 0)) - fi(row.get("sell", 0))
+            if sid not in dm:
+                dm[sid] = {"f": 0, "t": 0, "d": 0}
+            if "Foreign" in name or "外資" in name:
+                dm[sid]["f"] += net
+            elif "Trust" in name or "投信" in name:
+                dm[sid]["t"] += net
+            elif "Dealer" in name or "自營" in name:
+                dm[sid]["d"] += net
+        # 轉換單位：張（1張=1000股）
+        return {sid: {"f": v["f"]//1000, "t": v["t"]//1000, "d": v["d"]//1000}
+                for sid, v in dm.items()}
+    except Exception:
+        return {}
 
 # ── 個股 API ──────────────────────────────────────────────────
 @st.cache_data(ttl=3600)
@@ -904,23 +894,27 @@ def get_rev(sid, token):
 
 def get_yahoo_target(sid):
     """
-    透過 yfinance 取得分析師目標價。
-    - 上市股票用 .TW，上櫃用 .TWO
-    - 找不到（404）或無目標價時靜默回傳 None，不拋出例外
+    取得分析師目標價。
+    優先用 yfinance，失敗（含404）完全靜默，不在 log 噴錯。
+    yfinance 對很多台股回傳 404，因此用 fast_info 先確認存在。
     """
     try:
         import yfinance as yf, pandas as _pd
+        import logging
+        # 壓制 yfinance / urllib 的 404 warning log
+        logging.getLogger("yfinance").setLevel(logging.CRITICAL)
     except ImportError:
         return None
-
-    import urllib.error, http.client
 
     for suffix in [".TW", ".TWO"]:
         try:
             ticker = yf.Ticker(f"{sid}{suffix}")
-            # fast_info 比 .info 快且不丟 404；若 currency 為空表示找不到
-            fi2 = ticker.fast_info
-            if not getattr(fi2, "currency", None):
+            # fast_info 不會觸發 404；currency 為空 = 找不到此股票
+            try:
+                currency = ticker.fast_info.get("currency") or ticker.fast_info.currency
+            except Exception:
+                currency = None
+            if not currency:
                 continue
             info = ticker.info or {}
             if not info.get("regularMarketPrice"):
@@ -937,9 +931,6 @@ def get_yahoo_target(sid):
                     "count":  int(count) if count else 0,
                     "source": f"Yahoo共識（{int(count or 0)}位分析師）",
                 }
-        except (urllib.error.HTTPError, http.client.RemoteDisconnected,
-                ConnectionError, TimeoutError):
-            continue   # 404 / 網路問題，靜默跳過
         except Exception:
             continue
     return None
@@ -1455,6 +1446,7 @@ def tab_scanner():
         if st.button("🔄 重新整理全市場數據",use_container_width=True,key="scn_refresh"):
             for fn in [fetch_twse_prices_all, fetch_twse_institution_all,
                        fetch_tpex_prices_all,  fetch_tpex_institution_all,
+                       fetch_finmind_institution_all,
                        fetch_disposed_cached,  fetch_full_delivery_cached,
                        fetch_delisting_cached, fetch_official_sectors]:
                 fn.clear()
@@ -1465,6 +1457,7 @@ def tab_scanner():
             if st.button("⬅ 返回列表",use_container_width=True,key="scn_back"):
                 st.session_state.scanner_sector=None; st.rerun()
     qdate=get_inst_date_str()
+    token = st.session_state.get("token", "")
     with st.spinner("📡 取得全市場數據 + 官方產業分類..."):
         twse_p = fetch_twse_prices_all()
         tpex_p = fetch_tpex_prices_all()
@@ -1473,12 +1466,20 @@ def tab_scanner():
         twse_i = fetch_twse_institution_all(qdate)
         tpex_i = fetch_tpex_institution_all(qdate)
         insts  = {**twse_i, **tpex_i}
+        # ── FinMind 備援：當 TWSE 法人資料不足時自動補上 ──────
+        twse_count = len(twse_i)
+        if twse_count < 100 and token:
+            with st.spinner(f"⚡ TWSE 法人僅{twse_count}筆，改用 FinMind 補全..."):
+                fm_i = fetch_finmind_institution_all(token, qdate)
+            if fm_i:
+                # FinMind 資料覆蓋 TWSE（以 FinMind 為準），再合併 TPEx
+                insts = {**fm_i, **tpex_i}
+                st.caption(f"📡 法人來源：FinMind（{len(fm_i)}筆） + TPEx（{len(tpex_i)}筆）")
         disposed  = fetch_disposed_cached()
         full_del  = fetch_full_delivery_cached()
         delist    = fetch_delisting_cached()
         hard_risk = full_del | delist | st.session_state.gemini_delisting
         # ── 官方產業分類（24 小時快取，幾乎不消耗時間）────────
-        token = st.session_state.get("token", "")
         sector_mapping = fetch_official_sectors(token)
     gkey=st.session_state.gemini_key
     if gkey:
@@ -1487,14 +1488,16 @@ def tab_scanner():
         if g_del: st.warning(f"🤖 Gemini 偵測 {len(g_del)} 支下市風險股：{', '.join(sorted(g_del)[:8])}")
         hard_risk=hard_risk|g_del
     now_tw=datetime.utcnow()+timedelta(hours=8)
-    inst_date=get_institution_query_date_str() if False else (now_tw.date()-timedelta(days=1) if now_tw.hour<17 else now_tw.date())
     time_note="（昨日盤後）" if now_tw.hour<17 else "（今日盤後）"
-    inst_note=f"法人：{len(insts)} 檔" if insts else "法人：今日未取得"
+    inst_src = "TWSE" if len(twse_i)>=100 else ("FinMind" if token else "未取得")
+    inst_note=f"法人：{len(insts)} 檔（{inst_src}）" if insts else "法人：今日未取得"
     sec_note = f"產業：{len(sector_mapping)} 種官方分類" if sector_mapping else "產業分類：載入中"
     st.caption(f"股價：{len(prices)} 檔 | {inst_note} | {sec_note} | {time_note}")
     if not prices: st.error("⚠️ 無法取得股價數據"); return
     if not sector_mapping:
         st.warning("⚠️ 無法取得產業分類資料，請確認網路或 FinMind Token 設定，稍後再試。")
+    if not insts:
+        st.info("ℹ️ 今日法人買賣數據尚未公布（通常收盤後 1~2 小時）；設定 FinMind Token 可改善取得率。")
 
     stats = compute_sector_stats(prices, insts, hard_risk, sector_mapping)
     if not st.session_state.get("scanner_sector"):
