@@ -48,7 +48,7 @@ ALL_STOCKS = {
     "2618":"長榮航","2633":"台灣高鐵","2880":"華南金","2883":"開發金","2885":"元大金",
     "2887":"台新金","2890":"永豐金","2892":"第一金","2912":"統一超","3008":"大立光",
     "3017":"奇鋐","3035":"智原","3036":"文曄","3044":"健鼎","3048":"益登",
-    "3081":"聯亞","3105":"穩懋","3293":"鈊象","3406":"玉晶光","3443":"創意",
+    "3081":"聯惠","3105":"穩懋","3293":"鈊象","3406":"玉晶光","3443":"創意",
     "3481":"群創","3529":"力旺","3533":"嘉澤","3550":"樂士","3583":"辛耘",
     "3587":"閎康","3645":"達亮","3665":"貿聯-KY","3698":"隆達","3702":"大聯大",
     "3706":"神達","4938":"和碩","4966":"譜瑞-KY","5347":"世界先進","5483":"中美晶",
@@ -309,6 +309,9 @@ def get_inst_date_str():
     d = (now_tw.date()-timedelta(days=1)) if now_tw.hour<17 else now_tw.date()
     while d.weekday()>=5: d -= timedelta(days=1)
     return d.strftime("%Y%m%d")
+
+# 別名，讓 tab_scanner 可正常呼叫
+get_institution_query_date_str = get_inst_date_str
 
 def search_stocks(query: str) -> list:
     """
@@ -593,15 +596,7 @@ body{background:#1a2332;color:#e8eaf0;font-family:'Helvetica Neue',Arial,sans-se
 @st.cache_data(ttl=86400)
 def fetch_official_sectors(token: str = "") -> dict:
     mapping = {}
-    mapping.update({
-        "2330": "半導體", "2303": "半導體", "2454": "半導體", "5347": "半導體", "3711": "半導體",
-        "2317": "其他電子", "2382": "電腦及週邊設備", "3231": "電腦及週邊設備", "2356": "電腦及週邊設備", 
-        "6669": "電腦及週邊設備", "2376": "電腦及週邊設備",
-        "2327": "電子零組件", "2308": "電子零組件", "3037": "電子零組件",
-        "2603": "航運", "2609": "航運", "2615": "航運",
-        "2881": "金融保險", "2891": "金融保險",
-        "3105": "半導體", "6770": "半導體"
-    })
+
     def clean_name(name):
         return name.replace("工業", "").replace("業", "") if len(name) > 2 else name
 
@@ -621,7 +616,7 @@ def fetch_official_sectors(token: str = "") -> dict:
         except Exception:
             pass
 
-    if len(mapping) > 100:
+    if mapping:
         return mapping  # FinMind 成功則直接回傳
 
     # 2. Fallback：TWSE
@@ -648,8 +643,6 @@ def fetch_official_sectors(token: str = "") -> dict:
                 code = str(item.get("SecuritiesCompanyCode", "")).strip()
                 ind  = str(item.get("Industry", "")).strip()
                 if code and ind:
-                    ind = str(ind)
-                    code = str(code)
                     mapping[code] = clean_name(ind)
     except Exception:
         pass
@@ -705,44 +698,16 @@ def fetch_twse_prices_all():
     try:
         r=requests.get("https://openapi.twse.com.tw/v1/exchangeReport/STOCK_DAY_ALL",headers=HDR,timeout=20,verify=False)
         if r.status_code==200:
-            # for item in r.json():
-            #     sid=str(item.get("Code","")).strip()
-            #     if not sid or not sid.isdigit(): continue
-            #     p=ff(str(item.get("ClosingPrice","0")).replace(",",""))
-            #     v = fi(str(item.get("TradeVolume", "0")).replace(",", "")) // 1000
-            #     chg=ff(str(item.get("Change","")).replace("+","").replace(",",""))
-            #     prev=p-chg if p else None; 
-            #     cp=round(chg/prev*100,2) if prev and prev>0 else 0.0
-            #     if p > 0 and v > 0:
-            #         out[sid]={"price":p,"volume":v,"chg_pct":cp,"name":str(item.get("Name","")).strip()}
-            # 💡 在這裡加上保護機制，嘗試解析 JSON
-            try:
-                data = r.json() 
-            except Exception:
-                # 如果解析失敗，就把證交所真實回傳的前 100 個字元印出來看
-                st.error(f"上市 API 異常：證交所沒有回傳 JSON 資料。回傳內容片段：{r.text[:100]}")
-                return out
-
-            for item in data:
-                sid = str(item.get("Code", "")).strip()
-                if not sid or not sid.isdigit(): 
-                    continue
-                
-                p = ff(str(item.get("ClosingPrice", "0")).replace(",", ""))
-                v = fi(str(item.get("TradeVolume", "0")).replace(",", "")) // 1000
-                chg = ff(str(item.get("Change", "")).replace("+", "").replace(",", ""))
-                
-                prev = p - chg if p else None
-                cp = round(chg / prev * 100, 2) if prev and prev > 0 else 0.0
-                
-                if p > 0 and v > 0:
-                    out[sid] = {"price": p, "volume": v, "chg_pct": cp, "name": str(item.get("Name", "")).strip()}
-        else:
-            # 🚨 顯示 API 拒絕連線的狀態碼
-            st.error(f"上市報價 API 異常，狀態碼：{r.status_code}。可能是證交所阻擋了請求。")
-    except Exception as e:
-        # 🚨 如果連線逾時或發生錯誤，直接顯示在畫面上
-        st.error(f"上市報價 API 連線失敗：{e}")
+            for item in r.json():
+                sid=str(item.get("Code","")).strip()
+                if not sid or not sid.isdigit(): continue
+                p=ff(str(item.get("ClosingPrice","0")).replace(",",""))
+                v=fi(str(item.get("TradeVolume","0")).replace(",",""))
+                chg=ff(str(item.get("Change","")).replace("+","").replace(",",""))
+                prev=p-chg if p else None; cp=round(chg/prev*100,2) if prev and prev>0 else 0.0
+                if p>0 and v>0:
+                    out[sid]={"price":p,"volume":v,"chg_pct":cp,"name":str(item.get("Name","")).strip()}
+    except Exception: pass
     return out
 
 @st.cache_data(ttl=14400)
@@ -1247,8 +1212,7 @@ def compute_sector_stats(prices: dict, insts: dict,
             continue
         if not p or p.get("price", 0) <= 0:
             continue
-        clean_code = str(code).split('.')[0].strip()
-        sector = sector_mapping.get(clean_code, "") or "其他"
+        sector = sector_mapping.get(code, "") or "其他"
         inst = insts.get(code, {})
         bucket[sector].append({
             "code":  code,
@@ -1286,201 +1250,93 @@ def compute_sector_stats(prices: dict, insts: dict,
     return stats
 
 def build_treemap_html(stocks, title):
-    """
-    專業熱力圖：Squarify 演算法 + Top20/其他合併 + 成交值/量切換。
-    台股慣例：🔴漲 🟢跌。只動此函式，其他程式碼不變。
-    """
-    if not stocks:
-        return "<body style='background:#1a2332;color:#e8eaf0;padding:20px'>無數據</body>"
-
-    js_data = json.dumps([{
-        "name":  s.get("name", s.get("code", "")),
-        "code":  s.get("code", ""),
-        "price": s.get("price", 0),
-        "chg":   round(s.get("chg", 0), 2),
-        "vol":   max(s.get("vol", 1), 1),
-    } for s in stocks], ensure_ascii=False)
-
-    title_esc = title.replace('"', '&quot;')
-
-    CSS = (
-        "*{box-sizing:border-box;margin:0;padding:0}"
-        "body{background:#1a2332;font-family:'Helvetica Neue',Arial,sans-serif}"
-        "#hdr{display:flex;align-items:center;gap:8px;padding:8px 12px;"
-        "     flex-wrap:wrap;border-bottom:1px solid #2c3e50}"
-        "#ti{color:#e8eaf0;font-size:13px;font-weight:700;flex-shrink:0}"
-        ".tb{background:#2c3e50;border:1px solid #3d5166;color:#8fa3b8;"
-        "    padding:3px 13px;border-radius:99px;cursor:pointer;font-size:12px;transition:all .15s}"
-        ".tb.on{background:#27ae60;border-color:#27ae60;color:#fff;font-weight:600}"
-        "#hint{font-size:11px;color:#8fa3b8;margin-left:auto}"
-        "#tm{position:relative;width:100%;height:450px;overflow:hidden;background:#1a2332}"
-        ".c{position:absolute;display:flex;flex-direction:column;align-items:center;"
-        "   justify-content:center;border:1px solid #1a2332;border-radius:3px;"
-        "   overflow:hidden;cursor:default;transition:opacity .12s}"
-        ".c:hover{opacity:.82;z-index:10}"
-        ".c .cn{font-size:12px;font-weight:700;color:#fff;"
-        "       text-shadow:1px 1px 2px rgba(0,0,0,.9);"
-        "       white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:94%}"
-        ".c .cp{font-size:11px;color:#fff;text-shadow:1px 1px 2px rgba(0,0,0,.9)}"
-        ".c .cx{font-size:10px;color:rgba(255,255,255,.72)}"
-        ".lg{display:flex;flex-direction:column;align-items:center;padding:5px 0}"
-        ".lb{width:280px;height:10px;border-radius:6px;"
-        "    background:linear-gradient(90deg,#145a32,#27ae60,#2d3436,#e74c3c,#8b0000)}"
-        ".ll{display:flex;justify-content:space-between;width:280px;"
-        "    font-size:10px;color:#8fa3b8;margin-top:2px}"
-    )
-
-    # JS 以字串拼接，避免 Python f-string 與 JS 大括號衝突
-    JS = (
-        "const RAW=" + js_data + ";\n"
-        "let MODE='amt';\n"
-        "const DATA=RAW.map(d=>Object.assign({},d,{amt:Math.round(d.price*d.vol)}));\n"
-        "\n"
-        "function getColor(c){\n"
-        "  if(c>=9)return'#8b0000';\n"
-        "  if(c>=6)return'#c0392b';\n"
-        "  if(c>=3)return'#e74c3c';\n"
-        "  if(c>=1)return'#ff6b6b';\n"
-        "  if(c>0) return'#ff9999';\n"
-        "  if(c===0)return'#2d3436';\n"
-        "  if(c>-1)return'#aaffaa';\n"
-        "  if(c>-3)return'#55efc4';\n"
-        "  if(c>-6)return'#27ae60';\n"
-        "  if(c>-9)return'#1e8449';\n"
-        "  return'#145a32';\n"
-        "}\n"
-        "\n"
-        "// ── Top20 + 其他合併 ────────────────────────────────\n"
-        "function getTop20(items,wk){\n"
-        "  const sorted=[...items].sort((a,b)=>b[wk]-a[wk]);\n"
-        "  const top=sorted.slice(0,20);\n"
-        "  const rest=sorted.slice(20);\n"
-        "  if(rest.length>0){\n"
-        "    const totalW=rest.reduce((s,d)=>s+d[wk],0)||1;\n"
-        "    const avgChg=rest.reduce((s,d)=>s+d.chg*d[wk],0)/totalW;\n"
-        "    top.push({name:'其他',code:'OTHER',price:0,chg:avgChg,\n"
-        "      vol:rest.reduce((s,d)=>s+d.vol,0),\n"
-        "      amt:rest.reduce((s,d)=>s+d.amt,0),isOther:true});\n"
-        "  }\n"
-        "  return top;\n"
-        "}\n"
-        "\n"
-        "// ── Squarify 演算法（防麵條方塊） ───────────────────\n"
-        "function worstAR(row,rowSum,shortSide){\n"
-        "  const rowLen=rowSum/shortSide;\n"
-        "  let worst=0;\n"
-        "  for(const d of row){\n"
-        "    const item=rowSum>0?(d.sw/rowSum)*shortSide:0;\n"
-        "    if(item<=0)continue;\n"
-        "    const ar=Math.max(rowLen/item,item/rowLen);\n"
-        "    if(ar>worst)worst=ar;\n"
-        "  }\n"
-        "  return worst;\n"
-        "}\n"
-        "\n"
-        "function squarify(items,x,y,w,h){\n"
-        "  const nodes=[];\n"
-        "  if(!items.length||w<1||h<1)return nodes;\n"
-        "  let rem=[...items],rx=x,ry=y,rw=w,rh=h;\n"
-        "  while(rem.length>0&&rw>0.5&&rh>0.5){\n"
-        "    const isVert=rw>=rh;\n"
-        "    const shortSide=Math.min(rw,rh);\n"
-        "    let row=[rem[0]],rowSum=rem[0].sw;\n"
-        "    for(let i=1;i<rem.length;i++){\n"
-        "      const d=rem[i];\n"
-        "      const newSum=rowSum+d.sw;\n"
-        "      const curr=worstAR(row,rowSum,shortSide);\n"
-        "      const next=worstAR([...row,d],newSum,shortSide);\n"
-        "      if(next<=curr){row.push(d);rowSum=newSum;}\n"
-        "      else break;\n"
-        "    }\n"
-        "    const rowLen=rowSum/shortSide;\n"
-        "    let off=isVert?ry:rx;\n"
-        "    for(const d of row){\n"
-        "      const frac=d.sw/rowSum;\n"
-        "      const cs=frac*shortSide;\n"
-        "      if(isVert)\n"
-        "        nodes.push(Object.assign({},d,{x:rx,y:off,w:rowLen,h:cs}));\n"
-        "      else\n"
-        "        nodes.push(Object.assign({},d,{x:off,y:ry,w:cs,h:rowLen}));\n"
-        "      off+=cs;\n"
-        "    }\n"
-        "    rem=rem.slice(row.length);\n"
-        "    if(isVert){rx+=rowLen;rw-=rowLen;}\n"
-        "    else{ry+=rowLen;rh-=rowLen;}\n"
-        "  }\n"
-        "  return nodes;\n"
-        "}\n"
-        "\n"
-        "// ── 渲染 ─────────────────────────────────────────────\n"
-        "function render(){\n"
-        "  const ct=document.getElementById('tm');\n"
-        "  const W=ct.offsetWidth||800,H=450;\n"
-        "  const top=getTop20(DATA,MODE);\n"
-        "  const totalW=top.reduce((s,d)=>s+d[MODE],0)||1;\n"
-        "  const scale=(W*H)/totalW;\n"
-        "  const scaled=top.map(d=>Object.assign({},d,{sw:d[MODE]*scale}));\n"
-        "  const cells=squarify(scaled,0,0,W,H);\n"
-        "  ct.innerHTML='';\n"
-        "  cells.forEach(function(c){\n"
-        "    if(c.w<1||c.h<1)return;\n"
-        "    const div=document.createElement('div');\n"
-        "    div.className='c';\n"
-        "    const bg=c.isOther?'#2d3436':getColor(c.chg);\n"
-        "    div.style.left=Math.round(c.x+0.5)+'px';\n"
-        "    div.style.top=Math.round(c.y+0.5)+'px';\n"
-        "    div.style.width=Math.max(Math.round(c.w-1),1)+'px';\n"
-        "    div.style.height=Math.max(Math.round(c.h-1),1)+'px';\n"
-        "    div.style.background=bg;\n"
-        "    const sign=c.chg>=0?'+':'';\n"
-        "    div.title=c.name+' '+c.code+'\\n'+c.price+'元 '+sign+c.chg.toFixed(2)+'%';\n"
-        "    if(c.w>38&&c.h>26){\n"
-        "      let inner='';\n"
-        "      if(c.w>56&&c.h>42)inner+='<div class=\"cn\">'+c.name+'</div>';\n"
-        "      inner+='<div class=\"cp\">'+sign+c.chg.toFixed(1)+'%</div>';\n"
-        "      if(c.h>58&&c.price)inner+='<div class=\"cx\">'+c.price+'元</div>';\n"
-        "      div.innerHTML=inner;\n"
-        "    }\n"
-        "    ct.appendChild(div);\n"
-        "  });\n"
-        "}\n"
-        "\n"
-        "function sw(m){\n"
-        "  MODE=m;\n"
-        "  document.getElementById('b-amt').className='tb'+(m==='amt'?' on':'');\n"
-        "  document.getElementById('b-vol').className='tb'+(m==='vol'?' on':'');\n"
-        "  document.getElementById('hint').textContent=\n"
-        "    m==='amt'?'方塊大小=成交值，\U0001f534漲\U0001f7e2跌':'方塊大小=成交量，\U0001f534漲\U0001f7e2跌';\n"
-        "  render();\n"
-        "}\n"
-        "\n"
-        "render();\n"
-        "window.addEventListener('resize',render);\n"
-    )
-
-    return (
-        "<!DOCTYPE html><html lang=\"zh-TW\"><head>"
-        "<meta charset=\"UTF-8\">"
-        "<meta name=\"viewport\" content=\"width=device-width,initial-scale=1\">"
-        "<style>" + CSS + "</style></head><body>"
-        "<div id=\"hdr\">"
-        "  <div id=\"ti\">\U0001f321\ufe0f " + title_esc + "</div>"
-        "  <button class=\"tb on\" id=\"b-amt\" onclick=\"sw('amt')\">成交值</button>"
-        "  <button class=\"tb\" id=\"b-vol\" onclick=\"sw('vol')\">成交量</button>"
-        "  <span id=\"hint\">方塊大小=成交值，\U0001f534漲\U0001f7e2跌</span>"
-        "</div>"
-        "<div id=\"tm\"></div>"
-        "<div class=\"lg\">"
-        "  <div class=\"lb\"></div>"
-        "  <div class=\"ll\">"
-        "    <span>-10%+</span><span>-5%</span><span>平盤</span>"
-        "    <span>+5%</span><span>+10%+</span>"
-        "  </div>"
-        "</div>"
-        "<script>" + JS + "</script>"
-        "</body></html>"
-    )
-
+    if not stocks: return "<body style='background:#1a2332;color:#e8eaf0;padding:20px'>無數據</body>"
+    def chg_color(c):
+        if c>=9: return "#8b0000"
+        elif c>=6: return "#c0392b"
+        elif c>=3: return "#e74c3c"
+        elif c>=1: return "#ff6b6b"
+        elif c>0: return "#ff9999"
+        elif c==0: return "#2d3436"
+        elif c>-1: return "#aaffaa"
+        elif c>-3: return "#55efc4"
+        elif c>-6: return "#27ae60"
+        elif c>-9: return "#1e8449"
+        else: return "#145a32"
+    js_data=json.dumps([{"name":s.get("name",s.get("code","")),"code":s.get("code",""),
+                          "price":s.get("price",0),"chg":round(s.get("chg",0),2),
+                          "vol":max(s.get("vol",1),1),"color":chg_color(s.get("chg",0))}
+                         for s in stocks],ensure_ascii=False)
+    return f"""<!DOCTYPE html><html><head><meta charset="UTF-8">
+<style>*{{box-sizing:border-box;margin:0;padding:0}}body{{background:#1a2332;font-family:Arial}}
+#ti{{color:#e8eaf0;font-size:13px;font-weight:700;padding:8px 12px}}
+#tm{{position:relative;width:100%;height:450px;overflow:hidden}}
+.c{{position:absolute;display:flex;flex-direction:column;align-items:center;justify-content:center;
+    border:1px solid #1a2332;border-radius:3px;overflow:hidden;cursor:default}}
+.c:hover{{opacity:.85;z-index:10}}
+.c .n{{font-size:12px;font-weight:700;color:#fff;text-shadow:1px 1px 2px rgba(0,0,0,.9);
+       white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:95%}}
+.c .p{{font-size:11px;color:#fff;text-shadow:1px 1px 2px rgba(0,0,0,.9)}}
+.lg{{display:flex;flex-direction:column;align-items:center;padding:6px 0}}
+.lb{{width:280px;height:12px;border-radius:6px;
+     background:linear-gradient(90deg,#145a32,#27ae60,#2d3436,#e74c3c,#8b0000)}}
+.ll{{display:flex;justify-content:space-between;width:280px;font-size:10px;color:#8fa3b8;margin-top:2px}}</style>
+</head><body>
+<div id="ti">🌡️ {title}（方塊大小=成交量，🔴漲🟢跌）</div>
+<div id="tm"></div>
+<div class="lg"><div class="lb"></div><div class="ll"><span>-10%+</span><span>-5%</span><span>平盤</span><span>+5%</span><span>+10%+</span></div></div>
+<script>
+const D={js_data};
+const ct=document.getElementById('tm');
+function layout(items,x,y,w,h){{
+  const total=items.reduce((s,d)=>s+d.vol,0)||1;
+  const cells=[]; let row=[],rv=0,cx=x,cy=y,rw=w,rh=h;
+  function place(row,rv,px,py,pw,ph){{
+    const short=Math.min(pw,ph),side=rv/total*(pw*ph)/short;
+    let ox=px,oy=py;
+    for(const r of row){{
+      const f=r.vol/rv;
+      if(pw<=ph){{cells.push({{...r,x:ox,y:oy,w:side,h:f*short}});oy+=f*short;}}
+      else{{cells.push({{...r,x:ox,y:oy,w:f*side,h:short}});ox+=f*side;}}
+    }}
+    return side;
+  }}
+  for(let i=0;i<items.length;i++){{
+    const d=items[i];
+    if(!row.length){{row.push(d);rv+=d.vol;}}
+    else{{
+      const tv=rv+d.vol,short=Math.min(rw,rh);
+      const side=tv/total*(rw*rh)/short;
+      const testAsp=Math.max(...[...row,d].map(r=>{{const f=r.vol/tv;const rl=f*(rw<=rh?rh:rw)*short/side;return Math.max(side/rl,rl/side);}}));
+      const currAsp=Math.max(...row.map(r=>{{const f=r.vol/rv;const sl=rv/total*(rw*rh)/short;const rl=f*(rw<=rh?rh:rw)*short/sl;return Math.max(sl/rl,rl/sl);}}));
+      if(testAsp<=currAsp){{row.push(d);rv+=d.vol;}}
+      else{{
+        const s=place(row,rv,cx,cy,rw,rh);
+        if(rw<=rh){{cy+=s;rh-=s;}}else{{cx+=s;rw-=s;}}
+        row=[d];rv=d.vol;
+      }}
+    }}
+    if(i===items.length-1&&row.length)place(row,rv,cx,cy,rw,rh);
+  }}
+  return cells;
+}}
+function render(){{
+  const W=ct.offsetWidth||800,H=450;
+  const sorted=[...D].sort((a,b)=>b.vol-a.vol);
+  const cells=layout(sorted,0,0,W,H);
+  ct.innerHTML='';
+  cells.forEach(c=>{{
+    const div=document.createElement('div');
+    div.className='c';
+    div.style.cssText=`left:${{Math.round(c.x+1)}}px;top:${{Math.round(c.y+1)}}px;width:${{Math.max(Math.round(c.w-2),2)}}px;height:${{Math.max(Math.round(c.h-2),2)}}px;background:${{c.color}}`;
+    div.title=c.name+' '+c.code+'\\n'+c.price+'元 '+(c.chg>=0?'+':'')+c.chg+'%';
+    const sign=c.chg>=0?'+':'';
+    if(c.w>50&&c.h>35)div.innerHTML=(c.w>70&&c.h>50?`<div class="n">${{c.name}}</div>`:'')+`<div class="p">${{sign}}${{c.chg.toFixed(1)}}%</div>`;
+    ct.appendChild(div);
+  }});
+}}
+render();window.addEventListener('resize',render);
+</script></body></html>"""
 
 def tab_scanner():
     st.markdown("### 📡 籌碼掃描 — 產業透視")
@@ -1521,7 +1377,7 @@ def tab_scanner():
         if g_del: st.warning(f"🤖 Gemini 偵測 {len(g_del)} 支下市風險股：{', '.join(sorted(g_del)[:8])}")
         hard_risk=hard_risk|g_del
     now_tw=datetime.utcnow()+timedelta(hours=8)
-    inst_date=get_institution_query_date_str() if False else (now_tw.date()-timedelta(days=1) if now_tw.hour<17 else now_tw.date())
+    inst_date=get_institution_query_date_str()
     time_note="（昨日盤後）" if now_tw.hour<17 else "（今日盤後）"
     inst_note=f"法人：{len(insts)} 檔" if insts else "法人：今日未取得"
     sec_note = f"產業：{len(sector_mapping)} 種官方分類" if sector_mapping else "產業分類：載入中"
@@ -1529,6 +1385,8 @@ def tab_scanner():
     if not prices: st.error("⚠️ 無法取得股價數據"); return
     if not sector_mapping:
         st.warning("⚠️ 無法取得產業分類資料，請確認網路或 FinMind Token 設定，稍後再試。")
+    if not insts:
+        st.info("ℹ️ 今日法人買賣數據尚未公布（通常收盤後 1~2 小時）；法人欄位顯示為 0，其餘數據正常。")
 
     stats = compute_sector_stats(prices, insts, hard_risk, sector_mapping)
     if not st.session_state.get("scanner_sector"):
@@ -1541,24 +1399,26 @@ def tab_scanner():
             st.markdown("**🔴 強勢族群（漲幅前5）**")
             for s in sorted_desc[:5]:
                 chg=s["avg_chg"]; bar_w=min(int(abs(chg)/10*100),100)
+                chg_sign="+" if chg>=0 else ""
                 st.markdown(
                     f'<div style="display:flex;align-items:center;gap:6px;margin-bottom:6px">'
                     f'<span style="width:75px;font-size:12px;color:#e8eaf0;font-weight:600">{s["name"][:6]}</span>'
                     f'<div style="flex:1;background:#2c3e50;border-radius:3px;height:18px;position:relative">'
                     f'<div style="width:{bar_w}%;height:100%;background:#e74c3c;border-radius:3px"></div>'
-                    f'<span style="position:absolute;right:4px;top:1px;font-size:11px;color:#fff;font-weight:700">+{chg:.2f}%</span></div>'
+                    f'<span style="position:absolute;right:4px;top:1px;font-size:11px;color:#fff;font-weight:700">{chg_sign}{chg:.2f}%</span></div>'
                     f'<span style="font-size:10px;color:#8fa3b8;width:38px;text-align:right">{s["weight"]:.1f}%</span>'
                     f'</div>',unsafe_allow_html=True)
         with c_r:
             st.markdown("**🟢 弱勢族群（跌幅前5）**")
             for s in sorted_asc[:5]:
                 chg=s["avg_chg"]; bar_w=min(int(abs(chg)/10*100),100)
+                chg_sign="+" if chg>=0 else ""
                 st.markdown(
                     f'<div style="display:flex;align-items:center;gap:6px;margin-bottom:6px">'
                     f'<span style="width:75px;font-size:12px;color:#e8eaf0;font-weight:600">{s["name"][:6]}</span>'
                     f'<div style="flex:1;background:#2c3e50;border-radius:3px;height:18px;position:relative">'
                     f'<div style="width:{bar_w}%;height:100%;background:#27ae60;border-radius:3px"></div>'
-                    f'<span style="position:absolute;right:4px;top:1px;font-size:11px;color:#fff;font-weight:700">{chg:.2f}%</span></div>'
+                    f'<span style="position:absolute;right:4px;top:1px;font-size:11px;color:#fff;font-weight:700">{chg_sign}{chg:.2f}%</span></div>'
                     f'<span style="font-size:10px;color:#8fa3b8;width:38px;text-align:right">{s["weight"]:.1f}%</span>'
                     f'</div>',unsafe_allow_html=True)
         st.markdown("---")
@@ -1614,18 +1474,62 @@ def tab_scanner():
                   for s in s_data["stocks"]]
             if rows:
                 rows.sort(key=lambda x:x["漲跌%"],reverse=True)
-                st.dataframe(pd.DataFrame(rows),use_container_width=True,hide_index=True)
+                st.dataframe(pd.DataFrame(rows),width='stretch',hide_index=True)
                 avg_chg2=round(sum(r["漲跌%"] for r in rows)/len(rows),2)
                 up_cnt=sum(1 for r in rows if r["漲跌%"]>0)
                 cc1,cc2,cc3=st.columns(3)
                 cc1.metric("平均漲跌",f"{'+' if avg_chg2>=0 else ''}{avg_chg2:.1f}%")
                 cc2.metric("法人合計",f"{s_data['net_inst']:+,}張" if s_data["net_inst"] else "未取得")
                 cc3.metric("上漲/下跌",f"{up_cnt}/{len(rows)-up_cnt}")
+                # ── 快速操作：加入自選 / 跳個股分析 ────────────────
+                st.markdown("---")
+                st.markdown("**⚡ 快速操作**（選股後加入自選或立即分析）")
+                stock_opts=[f"{s['code']} {s['name']}" for s in sorted(s_data["stocks"],key=lambda x:x["chg"],reverse=True)]
+                sel_stock=st.selectbox("選擇個股",stock_opts,label_visibility="collapsed",key=f"scn_pick_{sec_name}")
+                sel_code2=sel_stock.split(" ")[0]
+                sel_name2=sel_stock.split(" ",1)[1] if " " in sel_stock else sel_code2
+                qa,qb=st.columns(2)
+                with qa:
+                    if st.button(f"➕ 加入自選：{sel_name2}",use_container_width=True,key=f"scn_add_{sec_name}"):
+                        codes=[s.strip() for s in st.session_state.stock_list.split(",") if s.strip()]
+                        if sel_code2 not in codes:
+                            codes.insert(0,sel_code2)
+                            st.session_state.stock_list=",".join(codes)
+                            st.success(f"✅ 已加入自選：{sel_code2} {sel_name2}")
+                        else:
+                            st.info(f"已在自選清單中：{sel_code2}")
+                with qb:
+                    token2=st.session_state.get("token","")
+                    if st.button(f"🔍 立即分析：{sel_name2}",use_container_width=True,
+                                 disabled=not token2,key=f"scn_ana_{sec_name}",
+                                 help="需先在⚙️設定填入 FinMind Token"):
+                        disposed2=fetch_disposed_cached(); full_del2=fetch_full_delivery_cached()
+                        delist2=fetch_delisting_cached(); g_del2=st.session_state.gemini_delisting
+                        with st.spinner(f"分析 {sel_name2}（{sel_code2}）..."):
+                            r2,err2=analyze(sel_code2,token2,disposed2,full_del2,delist2,g_del2,force=True)
+                        if r2:
+                            idx2=next((i for i,x in enumerate(st.session_state.results) if x["sid"]==sel_code2),None)
+                            if idx2 is not None: st.session_state.results[idx2]=r2
+                            else: st.session_state.results=[r2]+st.session_state.results
+                            save_results_cache(st.session_state.results)
+                            rt2=r2["rating"]; sc2=r2["score"]
+                            rt_color={"S":"#27ae60","A":"#27ae60","B":"#f39c12","C":"#e74c3c"}.get(rt2,"#8fa3b8")
+                            st.markdown(
+                                f'<div style="background:#1a3a27;border-left:4px solid {rt_color};'
+                                f'border-radius:8px;padding:10px 14px;margin-top:6px">'
+                                f'<strong style="color:#fff">{sel_name2}（{sel_code2}）</strong> '
+                                f'<span style="color:{rt_color};font-size:16px;font-weight:700">{rt2}</span> '
+                                f'<span style="color:#8fa3b8">{sc2}分 | {r2["price"]:,.0f}元 '
+                                f'{r2["chg"]:+.1f}%</span><br>'
+                                f'<span style="font-size:11px;color:#8fa3b8">✅ 已加入個股分析，切換至「🔍 個股分析」可查看完整報告</span>'
+                                f'</div>',unsafe_allow_html=True)
+                        else:
+                            st.error(f"❌ 分析失敗：{err2}")
             else: st.info("此產業今日無數據")
         with tab_heat:
             if s_data["stocks"]:
                 heat_html=build_treemap_html(s_data["stocks"],f"{sec_name} 熱力圖")
-                components.html(heat_html,height=560,scrolling=False)
+                st.iframe(src=f"data:text/html;charset=utf-8,{requests.utils.quote(heat_html)}", height=560)
             else: st.info("此產業今日無數據")
 
 def tab_analysis():
@@ -1736,7 +1640,7 @@ def tab_analysis():
                 if idx is not None: st.session_state.results[idx]=new_r
                 save_results_cache(st.session_state.results); st.success("✅ 已更新"); st.rerun()
             else: st.error(f"❌ {err}")
-    components.html(html,height=2700,scrolling=True)
+    st.iframe(src=f"data:text/html;charset=utf-8,{requests.utils.quote(html)}", height=2700)
 
 def tab_calendar():
     st.markdown("### 📅 財經行事曆")
@@ -1786,7 +1690,7 @@ def tab_calendar():
     co3.metric("🔴 利空",bear_cnt); co4.metric("⚪ 中性",len(events)-bull_cnt-bear_cnt)
     try:
         cal_html=build_calendar_html(events,st.session_state.cal_year,st.session_state.cal_month)
-        components.html(cal_html,height=1250,scrolling=True)
+        st.iframe(src=f"data:text/html;charset=utf-8,{requests.utils.quote(cal_html)}", height=1250)
     except Exception as e:
         st.error(f"月曆渲染失敗：{e}")
         pfx=f"{st.session_state.cal_year}-{st.session_state.cal_month:02d}"
@@ -1804,7 +1708,7 @@ def tab_rank():
                       "目標":f"{r['tp']:,.0f}" if r.get("tp") else "-",
                       "風控":("🚨全額交割" if r.get("is_full_del") else "⚠️下市" if r.get("is_delisting") else "⏱處置" if r.get("is_disposed") else "正常")}
                      for r in results])
-    st.dataframe(df,use_container_width=True,hide_index=True)
+    st.dataframe(df,width='stretch',hide_index=True)
     buy2=[r for r in results if r["fc"]>0 and r["tc"]>0 and not r.get("is_hard_risk",False)]
     if buy2:
         st.markdown("### ✅ 外資+投信同向買超")
