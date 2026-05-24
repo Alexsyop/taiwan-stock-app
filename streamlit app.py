@@ -593,11 +593,23 @@ body{background:#1a2332;color:#e8eaf0;font-family:'Helvetica Neue',Arial,sans-se
 @st.cache_data(ttl=86400)
 def fetch_official_sectors(token: str = "") -> dict:
     mapping = {}
-
+    
+    # ── 💡 萬用保底庫：確保即使全市場被封鎖，核心權值股絕不失蹤 ──
+    fallback_map = {
+        "2330": "半導體", "2303": "半導體", "2454": "半導體", "5347": "半導體", "3711": "半導體",
+        "2317": "其他電子", "2382": "電腦及週邊設備", "3231": "電腦及週邊設備", "2356": "電腦及週邊設備", 
+        "6669": "電腦及週邊設備", "2376": "電腦及週邊設備",
+        "2327": "電子零組件", "2308": "電子零組件", "3037": "電子零組件",
+        "2603": "航運", "2609": "航運", "2615": "航運",
+        "2881": "金融保險", "2891": "金融保險",
+        "3105": "半導體", "6770": "半導體"
+    }
+    mapping.update(fallback_map)
+    
     def clean_name(name):
         return name.replace("工業", "").replace("業", "") if len(name) > 2 else name
 
-    # 1. 優先使用 FinMind（最穩定，且包含興櫃產業）
+    # 1. 優先使用 FinMind 
     if token:
         try:
             r = requests.get(
@@ -605,46 +617,107 @@ def fetch_official_sectors(token: str = "") -> dict:
                 params={"dataset": "TaiwanStockInfo", "token": token},
                 headers=HDR, timeout=25, verify=False)
             if r.status_code == 200:
-                for item in r.json().get("data", []):
-                    code = str(item.get("stock_id", "")).strip()
-                    ind  = str(item.get("industry_category", "")).strip()
-                    if code and ind and ind not in ("None", ""):
+                payload = r.json()
+                data = payload.get("data", [])
+                if data:
+                    for item in data:
+                        code = str(item.get("stock_id", "")).strip()
+                        ind  = str(item.get("industry_category", "")).strip()
+                        if code and ind and ind not in ("None", ""):
+                            mapping[code] = clean_name(ind)
+                else:
+                    st.error(f"⚠️ FinMind Token 驗證成功，但未回傳產業資料（回傳內容：{payload}）")
+            else:
+                st.error(f"⚠️ FinMind 產業 API 連線失敗，狀態碼：{r.status_code}")
+        except Exception as e:
+            st.error(f"⚠️ FinMind 產業 API 異常：{e}")
+
+    # 💡 關鍵安全閥：如果總筆數小於 1000 筆（代表 FinMind 失敗或資料殘缺），強制執行開源 API 補全
+    if len(mapping) < 1000:
+        # 2. Fallback：TWSE (上市)
+        try:
+            r = requests.get(
+                "https://openapi.twse.com.tw/v1/opendata/t187ap03_L",
+                headers=HDR, timeout=25, verify=False)
+            if r.status_code == 200:
+                for item in r.json():
+                    code = str(item.get("公司代號", "")).strip()
+                    ind  = str(item.get("產業類別", "")).strip()
+                    if code and ind:
+                        mapping[code] = clean_name(ind)
+            else:
+                st.warning(f"⚠️ 證交所(上市)產業 API 遭阻擋，狀態碼：{r.status_code}。")
+        except Exception:
+            pass
+
+        # 3. Fallback：TPEx (上櫃)
+        try:
+            r = requests.get(
+                "https://www.tpex.org.tw/openapi/v1/tpex_listed_companies",
+                headers=HDR, timeout=25, verify=False)
+            if r.status_code == 200:
+                for item in r.json():
+                    code = str(item.get("SecuritiesCompanyCode", "")).strip()
+                    ind  = str(item.get("Industry", "")).strip()
+                    if code and ind:
                         mapping[code] = clean_name(ind)
         except Exception:
             pass
 
-    if mapping:
-        return mapping  # FinMind 成功則直接回傳
-
-    # 2. Fallback：TWSE
-    try:
-        r = requests.get(
-            "https://openapi.twse.com.tw/v1/opendata/t187ap03_L",
-            headers=HDR, timeout=25, verify=False)
-        if r.status_code == 200:
-            for item in r.json():
-                code = str(item.get("公司代號", "")).strip()
-                ind  = str(item.get("產業類別", "")).strip()
-                if code and ind:
-                    mapping[code] = clean_name(ind)
-    except Exception:
-        pass
-
-    # 3. Fallback：TPEx
-    try:
-        r = requests.get(
-            "https://www.tpex.org.tw/openapi/v1/tpex_listed_companies",
-            headers=HDR, timeout=25, verify=False)
-        if r.status_code == 200:
-            for item in r.json():
-                code = str(item.get("SecuritiesCompanyCode", "")).strip()
-                ind  = str(item.get("Industry", "")).strip()
-                if code and ind:
-                    mapping[code] = clean_name(ind)
-    except Exception:
-        pass
-
     return mapping
+    # mapping = {}
+
+    # def clean_name(name):
+    #     return name.replace("工業", "").replace("業", "") if len(name) > 2 else name
+
+    # # 1. 優先使用 FinMind（最穩定，且包含興櫃產業）
+    # if token:
+    #     try:
+    #         r = requests.get(
+    #             FINMIND_API,
+    #             params={"dataset": "TaiwanStockInfo", "token": token},
+    #             headers=HDR, timeout=25, verify=False)
+    #         if r.status_code == 200:
+    #             for item in r.json().get("data", []):
+    #                 code = str(item.get("stock_id", "")).strip()
+    #                 ind  = str(item.get("industry_category", "")).strip()
+    #                 if code and ind and ind not in ("None", ""):
+    #                     mapping[code] = clean_name(ind)
+    #     except Exception:
+    #         pass
+
+    # if mapping:
+    #     return mapping  # FinMind 成功則直接回傳
+
+    # # 2. Fallback：TWSE
+    # try:
+    #     r = requests.get(
+    #         "https://openapi.twse.com.tw/v1/opendata/t187ap03_L",
+    #         headers=HDR, timeout=25, verify=False)
+    #     if r.status_code == 200:
+    #         for item in r.json():
+    #             code = str(item.get("公司代號", "")).strip()
+    #             ind  = str(item.get("產業類別", "")).strip()
+    #             if code and ind:
+    #                 mapping[code] = clean_name(ind)
+    # except Exception:
+    #     pass
+
+    # # 3. Fallback：TPEx
+    # try:
+    #     r = requests.get(
+    #         "https://www.tpex.org.tw/openapi/v1/tpex_listed_companies",
+    #         headers=HDR, timeout=25, verify=False)
+    #     if r.status_code == 200:
+    #         for item in r.json():
+    #             code = str(item.get("SecuritiesCompanyCode", "")).strip()
+    #             ind  = str(item.get("Industry", "")).strip()
+    #             if code and ind:
+    #                 mapping[code] = clean_name(ind)
+    # except Exception:
+    #     pass
+
+    # return mapping
 
 
 @st.cache_data(ttl=3600)
