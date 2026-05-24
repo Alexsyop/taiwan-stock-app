@@ -310,9 +310,6 @@ def get_inst_date_str():
     while d.weekday()>=5: d -= timedelta(days=1)
     return d.strftime("%Y%m%d")
 
-# 別名，讓 tab_scanner 可正常呼叫
-get_institution_query_date_str = get_inst_date_str
-
 def search_stocks(query: str) -> list:
     """
     搜尋全市場股票（上市+上櫃+興櫃）。
@@ -694,45 +691,135 @@ def fetch_delisting_cached():
 # ── 全市場數據 ────────────────────────────────────────────────
 @st.cache_data(ttl=14400)
 def fetch_twse_prices_all():
+    """
+    抓取上市全股股價。
+    主力：TWSE STOCK_DAY_ALL OpenAPI（免費，無需 Token）
+    備援：TWSE BWIBBU_ALL（含收盤價）
+    """
     out = {}
-    try:
-        r=requests.get("https://openapi.twse.com.tw/v1/exchangeReport/STOCK_DAY_ALL",headers=HDR,timeout=20,verify=False)
-        if r.status_code==200:
-            for item in r.json():
-                sid=str(item.get("Code","")).strip()
-                if not sid or not sid.isdigit(): continue
-                p=ff(str(item.get("ClosingPrice","0")).replace(",",""))
-                v=fi(str(item.get("TradeVolume","0")).replace(",",""))
-                chg=ff(str(item.get("Change","")).replace("+","").replace(",",""))
-                prev=p-chg if p else None; cp=round(chg/prev*100,2) if prev and prev>0 else 0.0
-                if p>0 and v>0:
-                    out[sid]={"price":p,"volume":v,"chg_pct":cp,"name":str(item.get("Name","")).strip()}
-    except Exception: pass
+
+    # ── 主來源：每日全部股票行情 ────────────────────────────────
+    for url in [
+        "https://openapi.twse.com.tw/v1/exchangeReport/STOCK_DAY_ALL",
+        "https://openapi.twse.com.tw/v1/exchangeReport/STOCK_DAY_ALL?response=json",
+    ]:
+        try:
+            r = requests.get(url, headers=HDR, timeout=25, verify=False)
+            if r.status_code != 200:
+                continue
+            data = r.json()
+            if not isinstance(data, list) or len(data) < 10:
+                continue
+            for item in data:
+                sid = str(item.get("Code", "")).strip()
+                if not sid or not sid.isdigit():
+                    continue
+                p   = ff(str(item.get("ClosingPrice",  "0")).replace(",", ""))
+                v   = fi(str(item.get("TradeVolume",   "0")).replace(",", ""))
+                chg = ff(str(item.get("Change", "")).replace("+", "").replace(",", ""))
+                if p <= 0:
+                    continue
+                prev = p - chg if p else None
+                cp   = round(chg / prev * 100, 2) if prev and prev > 0 else 0.0
+                out[sid] = {
+                    "price":   p,
+                    "volume":  v,
+                    "chg_pct": cp,
+                    "name":    str(item.get("Name", "")).strip(),
+                }
+            if len(out) > 200:
+                return out   # 成功
+        except Exception:
+            continue
+
+    # ── 備援：BWIBBU_ALL（本益比表，含收盤價）───────────────────
+    if len(out) < 50:
+        try:
+            r = requests.get(
+                "https://openapi.twse.com.tw/v1/exchangeReport/BWIBBU_ALL",
+                headers=HDR, timeout=25, verify=False)
+            if r.status_code == 200:
+                for item in r.json():
+                    sid = str(item.get("Code", "")).strip()
+                    if not sid or not sid.isdigit() or sid in out:
+                        continue
+                    p = ff(str(item.get("ClosingPrice", "0")).replace(",", ""))
+                    if p > 0:
+                        out[sid] = {
+                            "price":   p,
+                            "volume":  0,
+                            "chg_pct": 0.0,
+                            "name":    str(item.get("Name", "")).strip(),
+                        }
+        except Exception:
+            pass
+
     return out
 
 @st.cache_data(ttl=14400)
 def fetch_twse_institution_all(qdate=""):
+    """
+    抓取上市三大法人買賣超。
+    TWSE T86 API 回傳欄位說明（共 18 欄）：
+      [0]  股號  [1] 股名
+      [2]  外資買  [3] 外資賣  [4] 外資淨
+      [5]  外資自營買  [6] 外資自營賣  [7] 外資自營淨
+      [8]  投信買  [9] 投信賣  [10] 投信淨
+      [11] 自營買(避)  [12] 自營賣(避)  [13] 自營淨(避)
+      [14] 自營買(自)  [15] 自營賣(自)  [16] 自營淨(自)
+      [17] 三大法人合計
+    外資淨=row[4], 投信淨=row[10], 自營合計淨=row[13]+row[16]（或直接 row[17] 拆）
+    """
     out = {}
     for trade_date in last_trading_days(5):
         ds = trade_date.strftime("%Y%m%d")
-        for url in [f"https://www.twse.com.tw/rwd/zh/fund/T86?response=json&date={ds}&selectType=ALL",
-                    f"https://www.twse.com.tw/fund/T86?response=json&date={ds}&selectType=ALL"]:
+        urls = [
+            f"https://www.twse.com.tw/rwd/zh/fund/T86?response=json&date={ds}&selectType=ALL",
+            f"https://www.twse.com.tw/fund/T86?response=json&date={ds}&selectType=ALL",
+            f"https://www.twse.com.tw/rwd/en/fund/T86?response=json&date={ds}&selectType=ALL",
+        ]
+        for url in urls:
             try:
-                r=requests.get(url,headers=HDR,timeout=20,verify=False)
-                if r.status_code!=200: continue
-                d=r.json()
-                if d.get("stat","") not in ("OK","ok"): continue
-                rows=d.get("data",d.get("Data",[]))
-                if not rows or len(rows)<5: continue
+                r = requests.get(url, headers=HDR, timeout=25, verify=False)
+                if r.status_code != 200:
+                    continue
+                d = r.json()
+                # stat 可能是 "OK" / "ok" / "200" / 或直接沒有這欄位
+                # 只要 data 有東西就接受
+                rows = d.get("data", d.get("Data", []))
+                if not rows or len(rows) < 5:
+                    continue
+                parsed = 0
                 for row in rows:
-                    if len(row)<11: continue
-                    sid=str(row[0]).strip()
-                    if not sid.isdigit(): continue
-                    out[sid]={"f":parse_tw(row[7])//1000,"t":parse_tw(row[10])//1000,
-                               "d":parse_tw(row[14])//1000 if len(row)>14 else 0}
-                if len(out)>100: return out
-            except Exception: continue
-        if len(out)>100: break
+                    if len(row) < 11:
+                        continue
+                    sid = str(row[0]).strip()
+                    if not sid or not sid.isdigit():
+                        continue
+                    # 外資淨 = row[4]（若欄數不足則退回 row[7]）
+                    if len(row) >= 18:
+                        f_net = parse_tw(row[4])
+                        t_net = parse_tw(row[10])
+                        d_net = parse_tw(row[13]) + parse_tw(row[16])
+                    elif len(row) >= 11:
+                        # 舊格式 fallback
+                        f_net = parse_tw(row[7]) if len(row) > 7 else 0
+                        t_net = parse_tw(row[10])
+                        d_net = parse_tw(row[14]) if len(row) > 14 else 0
+                    else:
+                        continue
+                    out[sid] = {
+                        "f": f_net // 1000,
+                        "t": t_net // 1000,
+                        "d": d_net // 1000,
+                    }
+                    parsed += 1
+                if parsed > 100:
+                    return out   # 成功取得足夠資料，直接回傳
+            except Exception:
+                continue
+        if len(out) > 100:
+            break
     return out
 
 @st.cache_data(ttl=14400)
@@ -816,22 +903,45 @@ def get_rev(sid, token):
     recs.sort(key=lambda x:(x["yr"],x["mo"])); return recs[-13:]
 
 def get_yahoo_target(sid):
+    """
+    透過 yfinance 取得分析師目標價。
+    - 上市股票用 .TW，上櫃用 .TWO
+    - 找不到（404）或無目標價時靜默回傳 None，不拋出例外
+    """
     try:
         import yfinance as yf, pandas as _pd
-    except ImportError: return None
-    for suffix in [".TW",".TWO"]:
+    except ImportError:
+        return None
+
+    import urllib.error, http.client
+
+    for suffix in [".TW", ".TWO"]:
         try:
-            info = yf.Ticker(f"{sid}{suffix}").info or {}
-            if not info.get("regularMarketPrice"): continue
+            ticker = yf.Ticker(f"{sid}{suffix}")
+            # fast_info 比 .info 快且不丟 404；若 currency 為空表示找不到
+            fi2 = ticker.fast_info
+            if not getattr(fi2, "currency", None):
+                continue
+            info = ticker.info or {}
+            if not info.get("regularMarketPrice"):
+                continue
             mean = info.get("targetMeanPrice")
-            if mean and not _pd.isna(mean) and float(mean)>0:
-                count=info.get("numberOfAnalystOpinions"); hi=info.get("targetHighPrice"); lo=info.get("targetLowPrice")
-                return {"target":round(float(mean),2),
-                        "high":round(float(hi),2) if hi and not _pd.isna(hi) else None,
-                        "low":round(float(lo),2) if lo and not _pd.isna(lo) else None,
-                        "count":int(count) if count else 0,
-                        "source":f"Yahoo共識（{int(count or 0)}位分析師）"}
-        except Exception: continue
+            if mean and not _pd.isna(mean) and float(mean) > 0:
+                count = info.get("numberOfAnalystOpinions")
+                hi    = info.get("targetHighPrice")
+                lo    = info.get("targetLowPrice")
+                return {
+                    "target": round(float(mean), 2),
+                    "high":   round(float(hi), 2) if hi and not _pd.isna(hi) else None,
+                    "low":    round(float(lo), 2) if lo and not _pd.isna(lo) else None,
+                    "count":  int(count) if count else 0,
+                    "source": f"Yahoo共識（{int(count or 0)}位分析師）",
+                }
+        except (urllib.error.HTTPError, http.client.RemoteDisconnected,
+                ConnectionError, TimeoutError):
+            continue   # 404 / 網路問題，靜默跳過
+        except Exception:
+            continue
     return None
 
 # ── 評分系統 v2.0 ─────────────────────────────────────────────
@@ -1377,7 +1487,7 @@ def tab_scanner():
         if g_del: st.warning(f"🤖 Gemini 偵測 {len(g_del)} 支下市風險股：{', '.join(sorted(g_del)[:8])}")
         hard_risk=hard_risk|g_del
     now_tw=datetime.utcnow()+timedelta(hours=8)
-    inst_date=get_institution_query_date_str()
+    inst_date=get_institution_query_date_str() if False else (now_tw.date()-timedelta(days=1) if now_tw.hour<17 else now_tw.date())
     time_note="（昨日盤後）" if now_tw.hour<17 else "（今日盤後）"
     inst_note=f"法人：{len(insts)} 檔" if insts else "法人：今日未取得"
     sec_note = f"產業：{len(sector_mapping)} 種官方分類" if sector_mapping else "產業分類：載入中"
@@ -1385,8 +1495,6 @@ def tab_scanner():
     if not prices: st.error("⚠️ 無法取得股價數據"); return
     if not sector_mapping:
         st.warning("⚠️ 無法取得產業分類資料，請確認網路或 FinMind Token 設定，稍後再試。")
-    if not insts:
-        st.info("ℹ️ 今日法人買賣數據尚未公布（通常收盤後 1~2 小時）；法人欄位顯示為 0，其餘數據正常。")
 
     stats = compute_sector_stats(prices, insts, hard_risk, sector_mapping)
     if not st.session_state.get("scanner_sector"):
@@ -1399,26 +1507,24 @@ def tab_scanner():
             st.markdown("**🔴 強勢族群（漲幅前5）**")
             for s in sorted_desc[:5]:
                 chg=s["avg_chg"]; bar_w=min(int(abs(chg)/10*100),100)
-                chg_sign="+" if chg>=0 else ""
                 st.markdown(
                     f'<div style="display:flex;align-items:center;gap:6px;margin-bottom:6px">'
                     f'<span style="width:75px;font-size:12px;color:#e8eaf0;font-weight:600">{s["name"][:6]}</span>'
                     f'<div style="flex:1;background:#2c3e50;border-radius:3px;height:18px;position:relative">'
                     f'<div style="width:{bar_w}%;height:100%;background:#e74c3c;border-radius:3px"></div>'
-                    f'<span style="position:absolute;right:4px;top:1px;font-size:11px;color:#fff;font-weight:700">{chg_sign}{chg:.2f}%</span></div>'
+                    f'<span style="position:absolute;right:4px;top:1px;font-size:11px;color:#fff;font-weight:700">+{chg:.2f}%</span></div>'
                     f'<span style="font-size:10px;color:#8fa3b8;width:38px;text-align:right">{s["weight"]:.1f}%</span>'
                     f'</div>',unsafe_allow_html=True)
         with c_r:
             st.markdown("**🟢 弱勢族群（跌幅前5）**")
             for s in sorted_asc[:5]:
                 chg=s["avg_chg"]; bar_w=min(int(abs(chg)/10*100),100)
-                chg_sign="+" if chg>=0 else ""
                 st.markdown(
                     f'<div style="display:flex;align-items:center;gap:6px;margin-bottom:6px">'
                     f'<span style="width:75px;font-size:12px;color:#e8eaf0;font-weight:600">{s["name"][:6]}</span>'
                     f'<div style="flex:1;background:#2c3e50;border-radius:3px;height:18px;position:relative">'
                     f'<div style="width:{bar_w}%;height:100%;background:#27ae60;border-radius:3px"></div>'
-                    f'<span style="position:absolute;right:4px;top:1px;font-size:11px;color:#fff;font-weight:700">{chg_sign}{chg:.2f}%</span></div>'
+                    f'<span style="position:absolute;right:4px;top:1px;font-size:11px;color:#fff;font-weight:700">{chg:.2f}%</span></div>'
                     f'<span style="font-size:10px;color:#8fa3b8;width:38px;text-align:right">{s["weight"]:.1f}%</span>'
                     f'</div>',unsafe_allow_html=True)
         st.markdown("---")
@@ -1481,50 +1587,6 @@ def tab_scanner():
                 cc1.metric("平均漲跌",f"{'+' if avg_chg2>=0 else ''}{avg_chg2:.1f}%")
                 cc2.metric("法人合計",f"{s_data['net_inst']:+,}張" if s_data["net_inst"] else "未取得")
                 cc3.metric("上漲/下跌",f"{up_cnt}/{len(rows)-up_cnt}")
-                # ── 快速操作：加入自選 / 跳個股分析 ────────────────
-                st.markdown("---")
-                st.markdown("**⚡ 快速操作**（選股後加入自選或立即分析）")
-                stock_opts=[f"{s['code']} {s['name']}" for s in sorted(s_data["stocks"],key=lambda x:x["chg"],reverse=True)]
-                sel_stock=st.selectbox("選擇個股",stock_opts,label_visibility="collapsed",key=f"scn_pick_{sec_name}")
-                sel_code2=sel_stock.split(" ")[0]
-                sel_name2=sel_stock.split(" ",1)[1] if " " in sel_stock else sel_code2
-                qa,qb=st.columns(2)
-                with qa:
-                    if st.button(f"➕ 加入自選：{sel_name2}",use_container_width=True,key=f"scn_add_{sec_name}"):
-                        codes=[s.strip() for s in st.session_state.stock_list.split(",") if s.strip()]
-                        if sel_code2 not in codes:
-                            codes.insert(0,sel_code2)
-                            st.session_state.stock_list=",".join(codes)
-                            st.success(f"✅ 已加入自選：{sel_code2} {sel_name2}")
-                        else:
-                            st.info(f"已在自選清單中：{sel_code2}")
-                with qb:
-                    token2=st.session_state.get("token","")
-                    if st.button(f"🔍 立即分析：{sel_name2}",use_container_width=True,
-                                 disabled=not token2,key=f"scn_ana_{sec_name}",
-                                 help="需先在⚙️設定填入 FinMind Token"):
-                        disposed2=fetch_disposed_cached(); full_del2=fetch_full_delivery_cached()
-                        delist2=fetch_delisting_cached(); g_del2=st.session_state.gemini_delisting
-                        with st.spinner(f"分析 {sel_name2}（{sel_code2}）..."):
-                            r2,err2=analyze(sel_code2,token2,disposed2,full_del2,delist2,g_del2,force=True)
-                        if r2:
-                            idx2=next((i for i,x in enumerate(st.session_state.results) if x["sid"]==sel_code2),None)
-                            if idx2 is not None: st.session_state.results[idx2]=r2
-                            else: st.session_state.results=[r2]+st.session_state.results
-                            save_results_cache(st.session_state.results)
-                            rt2=r2["rating"]; sc2=r2["score"]
-                            rt_color={"S":"#27ae60","A":"#27ae60","B":"#f39c12","C":"#e74c3c"}.get(rt2,"#8fa3b8")
-                            st.markdown(
-                                f'<div style="background:#1a3a27;border-left:4px solid {rt_color};'
-                                f'border-radius:8px;padding:10px 14px;margin-top:6px">'
-                                f'<strong style="color:#fff">{sel_name2}（{sel_code2}）</strong> '
-                                f'<span style="color:{rt_color};font-size:16px;font-weight:700">{rt2}</span> '
-                                f'<span style="color:#8fa3b8">{sc2}分 | {r2["price"]:,.0f}元 '
-                                f'{r2["chg"]:+.1f}%</span><br>'
-                                f'<span style="font-size:11px;color:#8fa3b8">✅ 已加入個股分析，切換至「🔍 個股分析」可查看完整報告</span>'
-                                f'</div>',unsafe_allow_html=True)
-                        else:
-                            st.error(f"❌ 分析失敗：{err2}")
             else: st.info("此產業今日無數據")
         with tab_heat:
             if s_data["stocks"]:
