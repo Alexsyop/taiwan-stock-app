@@ -824,7 +824,7 @@ def fetch_twse_prices_all():
 
 @st.cache_data(ttl=14400)
 def fetch_twse_institution_all(qdate=""):
-    """TWSE T86 上市法人。Streamlit Cloud 常被封(403)，回傳空 dict 由呼叫端用 FinMind 補。"""
+    """TWSE T86 上市法人（動態抓取欄位版，免疫證交所改版）"""
     out = {}
     for trade_date in last_trading_days(5):
         ds = trade_date.strftime("%Y%m%d")
@@ -835,27 +835,84 @@ def fetch_twse_institution_all(qdate=""):
             try:
                 r = requests.get(url, headers=HDR, timeout=20, verify=False)
                 if r.status_code != 200: continue
-                rows = r.json().get("data", r.json().get("Data", []))
-                if not rows or len(rows) < 5: continue
+                d = r.json()
+                
+                if d.get("stat", "").lower() not in ("ok", "ok."): continue
+                
+                fields = d.get("fields", [])
+                rows = d.get("data", d.get("Data", []))
+                if not rows or not fields: continue
+                
+                # ── 💡 終極解法：動態尋找欄位位置，再也不怕證交所改版 ──
+                idx_code = 0
+                idx_f, idx_t, idx_d = -1, -1, -1
+                
+                for i, col in enumerate(fields):
+                    if col == "證券代號": idx_code = i
+                    elif col in ["外陸資買賣超股數(含外資自營商)", "外資及陸資買賣超股數"]: idx_f = i
+                    elif col == "投信買賣超股數": idx_t = i
+                    elif col == "自營商買賣超股數": idx_d = i
+                    # 備援判斷：若找不到總計，找替代欄位
+                    elif idx_f == -1 and col == "外陸資買賣超股數(不含外資自營商)": idx_f = i
+                    elif idx_d == -1 and col == "自營商買賣超股數(自行買賣)": idx_d = i
+
+                # 如果連外資、投信的名稱都找不到，代表格式被大改或遇到阻擋，直接回傳空字典讓 FinMind 啟動
+                if idx_f == -1 or idx_t == -1:
+                    return {}
+
                 parsed = 0
                 for row in rows:
-                    if len(row) < 5: continue
-                    sid = str(row[0]).strip()
-                    if not sid or not sid.isdigit(): continue
-                    ncols = len(row)
-                    if ncols >= 18:
-                        f_net = parse_tw(row[4]); t_net = parse_tw(row[10])
-                        d_net = parse_tw(row[13]) + parse_tw(row[16])
-                    elif ncols >= 11:
-                        f_net = parse_tw(row[4]); t_net = parse_tw(row[7]); d_net = parse_tw(row[10])
-                    else:
-                        f_net = parse_tw(row[4]); t_net = parse_tw(row[7]) if ncols>7 else 0; d_net = 0
-                    out[sid] = {"f":f_net//1000,"t":t_net//1000,"d":d_net//1000}
-                    parsed += 1
+                    try:
+                        sid = str(row[idx_code]).strip()
+                        if not sid.isdigit(): continue
+                        
+                        f_net = parse_tw(row[idx_f]) if len(row) > idx_f else 0
+                        t_net = parse_tw(row[idx_t]) if len(row) > idx_t else 0
+                        d_net = parse_tw(row[idx_d]) if idx_d != -1 and len(row) > idx_d else 0
+                        
+                        out[sid] = {"f": f_net // 1000, "t": t_net // 1000, "d": d_net // 1000}
+                        parsed += 1
+                    except Exception:
+                        continue
+                        
                 if parsed > 100: return out
-            except Exception: continue
+            except Exception:
+                continue
         if len(out) > 100: break
     return out
+# def fetch_twse_institution_all(qdate=""):
+#     """TWSE T86 上市法人。Streamlit Cloud 常被封(403)，回傳空 dict 由呼叫端用 FinMind 補。"""
+#     out = {}
+#     for trade_date in last_trading_days(5):
+#         ds = trade_date.strftime("%Y%m%d")
+#         for url in [
+#             f"https://www.twse.com.tw/rwd/zh/fund/T86?response=json&date={ds}&selectType=ALL",
+#             f"https://www.twse.com.tw/fund/T86?response=json&date={ds}&selectType=ALL",
+#         ]:
+#             try:
+#                 r = requests.get(url, headers=HDR, timeout=20, verify=False)
+#                 if r.status_code != 200: continue
+#                 rows = r.json().get("data", r.json().get("Data", []))
+#                 if not rows or len(rows) < 5: continue
+#                 parsed = 0
+#                 for row in rows:
+#                     if len(row) < 5: continue
+#                     sid = str(row[0]).strip()
+#                     if not sid or not sid.isdigit(): continue
+#                     ncols = len(row)
+#                     if ncols >= 18:
+#                         f_net = parse_tw(row[4]); t_net = parse_tw(row[10])
+#                         d_net = parse_tw(row[13]) + parse_tw(row[16])
+#                     elif ncols >= 11:
+#                         f_net = parse_tw(row[4]); t_net = parse_tw(row[7]); d_net = parse_tw(row[10])
+#                     else:
+#                         f_net = parse_tw(row[4]); t_net = parse_tw(row[7]) if ncols>7 else 0; d_net = 0
+#                     out[sid] = {"f":f_net//1000,"t":t_net//1000,"d":d_net//1000}
+#                     parsed += 1
+#                 if parsed > 100: return out
+#             except Exception: continue
+#         if len(out) > 100: break
+#     return out
 
 @st.cache_data(ttl=14400)
 def fetch_tpex_prices_all():
