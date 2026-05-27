@@ -1,6 +1,6 @@
 """台股分析系統 v6.3 — 完整可執行版"""
 import os, json, re, time, calendar as _cal, warnings
-from datetime import date, datetime, timedelta
+from datetime import date, datetime, timedelta, timezone
 from collections import defaultdict
 import pandas as pd
 import requests
@@ -44,7 +44,7 @@ ALL_STOCKS = {
     "2353":"宏碁","2356":"英業達","3034":"聯詠","3037":"欣興","3231":"緯創",
     "1513":"中興電","2059":"川湖","2301":"光寶科","2337":"旺宏","2344":"華邦電",
     "2352":"佳世達","2371":"大同","2395":"研華","2409":"友達","2498":"宏達電",
-    "2603":"長榮","2606":"裕民","2609":"陽明","2610":"華航","2615":"萬海",
+    "2606":"裕民","2610":"華航",
     "2618":"長榮航","2633":"台灣高鐵","2880":"華南金","2883":"開發金","2885":"元大金",
     "2887":"台新金","2890":"永豐金","2892":"第一金","2912":"統一超","3008":"大立光",
     "3017":"奇鋐","3035":"智原","3036":"文曄","3044":"健鼎","3048":"益登",
@@ -54,9 +54,9 @@ ALL_STOCKS = {
     "3706":"神達","4938":"和碩","4966":"譜瑞-KY","5347":"世界先進","5483":"中美晶",
     "5880":"合庫金","6239":"力成","6271":"同欣電","6285":"啟碁","6415":"矽力-KY",
     "6488":"環球晶","6510":"精測","6515":"穎威","6526":"達發","6533":"晶心科",
-    "6670":"復盛應用","6669":"緯穎","6770":"力積電","8046":"南電","8150":"南茂",
+    "6670":"復盛應用","6770":"力積電","8046":"南電","8150":"南茂",
     "8299":"群聯","5274":"信驊","4919":"新唐","4958":"臻鼎-KY","4968":"立積",
-    "5269":"祥碩","3592":"瑞鼎","3596":"智易","6526":"達發","6533":"晶心科",
+    "5269":"祥碩","3592":"瑞鼎","3596":"智易",
 }
 
 _MARKET_NAMES: dict = {}
@@ -64,7 +64,8 @@ _MARKET_NAMES: dict = {}
 FINMIND_API = "https://api.finmindtrade.com/api/v4/data"
 GEMINI_MODEL = "gemini-2.0-flash"
 HDR = {"User-Agent":"Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"}
-CACHE_DIR = "/tmp/tw_stock_v63"
+import tempfile
+CACHE_DIR = os.path.join(tempfile.gettempdir(), "tw_stock_v63")
 os.makedirs(CACHE_DIR, exist_ok=True)
 
 RC  = {"S":"#1a5c38","A":"#27ae60","B":"#854F0B","C":"#A32D2D"}
@@ -296,7 +297,7 @@ def update_market_names(prices_dict: dict) -> None:
             _MARKET_NAMES[sid] = n
 
 def last_trading_days(n=5):
-    now_tw = datetime.utcnow() + timedelta(hours=8)
+    now_tw = datetime.now(timezone.utc) + timedelta(hours=8)
     start = (now_tw.date() - timedelta(days=1)) if now_tw.hour<17 else now_tw.date()
     days = []; d = start
     while len(days)<n:
@@ -305,7 +306,7 @@ def last_trading_days(n=5):
     return days
 
 def get_inst_date_str():
-    now_tw = datetime.utcnow() + timedelta(hours=8)
+    now_tw = datetime.now(timezone.utc) + timedelta(hours=8)
     d = (now_tw.date()-timedelta(days=1)) if now_tw.hour<17 else now_tw.date()
     while d.weekday()>=5: d -= timedelta(days=1)
     return d.strftime("%Y%m%d")
@@ -1212,7 +1213,7 @@ def analyze(sid, token, disposed, full_delivery, delisting, gemini_del, force=Fa
                     ga = get_gemini_target(sid, nm(sid), p, _gkey)
                     if ga:
                         tp=ga["target"]; tp_h=ga["high"]; tp_l=ga["low"]; tp_n=ga["count"]; ts=ga["source"]
-                    _tp_details=ga.get("details",[])
+                        _tp_details=ga.get("details",[])   # 修正：移入 if ga: 區塊內
             # ④ PE均值×成長估算（最後備援）
             if not tp and pea and pe and rev_yoy is not None and pe>0:
                 tp=round(p*(pea/pe)*min(max(1+rev_yoy/100,0.7),1.8),0); ts="PE均值×成長估算"
@@ -1787,8 +1788,8 @@ def tab_scanner():
             g_del=gemini_fetch_delisting(gkey)
         if g_del: st.warning(f"🤖 Gemini 偵測 {len(g_del)} 支下市風險股：{', '.join(sorted(g_del)[:8])}")
         hard_risk=hard_risk|g_del
-    now_tw=datetime.utcnow()+timedelta(hours=8)
-    inst_date=get_institution_query_date_str() if False else (now_tw.date()-timedelta(days=1) if now_tw.hour<17 else now_tw.date())
+    now_tw=datetime.now(timezone.utc)+timedelta(hours=8)
+    inst_date=get_inst_date_str()
     time_note="（昨日盤後）" if now_tw.hour<17 else "（今日盤後）"
     inst_note=f"法人：{len(insts)} 檔" if insts else "法人：今日未取得"
     sec_note = f"產業：{len(sector_mapping)} 種官方分類" if sector_mapping else "產業分類：載入中"
