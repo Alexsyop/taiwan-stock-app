@@ -945,7 +945,8 @@ def get_web_target(sid: str):
 
 def get_gemini_target(sid: str, name: str, price: float, gkey: str):
     """
-    Gemini + Google Search 搜尋法人分析師目標價（強化版 prompt）。
+    Gemini + Google Search 搜尋近期法人分析師目標價。
+    回傳 target/high/low/source（含個別券商細節）與 details 列表。
     """
     if not gkey or not sid:
         return None
@@ -954,24 +955,26 @@ def get_gemini_target(sid: str, name: str, price: float, gkey: str):
         client = genai.Client(api_key=gkey)
         price_str = str(int(price))
         prompt = (
-            "你是台灣股票研究員，請用 Google Search 搜尋以下股票的最新法人目標價。"
-            "股票：" + name + " 股號 " + sid
-            + " 目前股價 " + price_str + " 元。"
-            "請特別搜尋："
-            "1. 外資大摩(Morgan Stanley)、高盛(Goldman Sachs)、花旗(Citi)、"
-            "瑞銀(UBS)、麥格理(Macquarie)、巴克萊(Barclays)、匯豐(HSBC)"
-            "2. 本土元大、凱基、富邦、統一、永豐金、國泰、兆豐"
-            "的2024或2025年研究報告目標價（Target Price / 目標價 / TP）。"
-            "注意：只搜尋「目標價」，不要用現在股價當目標價。"
-            "回傳格式（只回傳 JSON，不含 markdown）："
-            "{"
-            "  \"mean_target\": 所有目標價的平均（數字），"
-            "  \"high_target\": 最高目標價（數字），"
-            "  \"low_target\": 最低目標價（數字），"
-            "  \"analyst_count\": 找到的筆數，"
-            "  \"source\": \"具體來源，例如：摩根士丹利900元、元大850元\""
-            "}"
-            "若真的完全找不到任何目標價資料，回傳空物件 {}"
+            "你是台灣股票研究員，請用 Google Search 搜尋近期（2024或2025年）"
+            "各大券商對以下股票發布的研究報告目標價。\n"
+            "股票：" + name + "（代號 " + sid + "），目前股價約 " + price_str + " 元。\n\n"
+            "搜尋範圍（請逐一查詢）：\n"
+            "外資：大摩(Morgan Stanley)、高盛(Goldman Sachs)、花旗(Citi)、"
+            "瑞銀(UBS)、麥格理(Macquarie)、巴克萊(Barclays)、匯豐(HSBC)、"
+            "野村(Nomura)\n"
+            "本土：元大、凱基、富邦、統一、永豐金、國泰、兆豐、玉山\n\n"
+            "重要規則：\n"
+            "1. 只搜尋研究報告裡的「目標價」，不要用現股價當目標價。\n"
+            "2. 若找到多筆，全部列出。\n"
+            "3. 只回傳 JSON，不含 markdown。\n\n"
+            "JSON 格式：\n"
+            "{\n"
+            "  \"results\": [\n"
+            "    {\"broker\":\"高盛(Goldman Sachs)\",\"target\":900,\"rating\":\"買進\",\"date\":\"2025-01\"},\n"
+            "    {\"broker\":\"花旗(Citi)\",\"target\":850,\"rating\":\"持有\",\"date\":\"2024-12\"}\n"
+            "  ]\n"
+            "}\n"
+            "若真的完全找不到任何券商目標價，回傳 {\"results\": []}"
         )
         response = None
         try:
@@ -986,29 +989,50 @@ def get_gemini_target(sid: str, name: str, price: float, gkey: str):
         if not response:
             return None
         text = re.sub(r"```[a-z]*", "", response.text)
-        text = re.sub(r"```",       "", text).strip()
-        m2 = re.search(r"\{[^{}]*\}", text, re.DOTALL)
+        text = re.sub(r"```", "", text).strip()
+        m2 = re.search(r"\{.*\}", text, re.DOTALL)
         if not m2:
             return None
         data = json.loads(m2.group())
-        mean = data.get("mean_target")
-        if not mean or float(mean) <= 0:
+        results = data.get("results", [])
+        if not results:
             return None
-        # 合理性檢查：目標價不應距離現價超過5倍或低於1/5
-        mean_f = float(mean)
-        if price > 0 and (mean_f > price * 5 or mean_f < price * 0.2):
-            print("【DEBUG】Gemini目標價不合理（" + str(mean_f) + " vs 現價" + price_str + "），捨棄")
+        # 過濾合理目標價（不超過現價5倍、不低於1/5）
+        valid = []
+        for item in results:
+            tp_val = item.get("target")
+            if tp_val and float(tp_val) > 0:
+                tp_f = float(tp_val)
+                if price <= 0 or (tp_f <= price * 5 and tp_f >= price * 0.2):
+                    valid.append(item)
+        if not valid:
+            print("【DEBUG】Gemini目標價全部不合理，捨棄 " + sid)
             return None
-        hi  = data.get("high_target") or mean
-        lo  = data.get("low_target")  or mean
-        cnt = data.get("analyst_count", 0)
-        src = str(data.get("source", "Gemini整合"))
+        targets = [float(v["target"]) for v in valid]
+        mean_tp = round(sum(targets) / len(targets), 0)
+        high_tp = round(max(targets), 0)
+        low_tp  = round(min(targets), 0)
+        # 組成可讀來源字串：「高盛 900元、花旗 850元」
+        src_parts = []
+        for v in valid:
+            broker = v.get("broker", "未知")
+            t_str  = str(int(float(v.get("target", 0)))) + "元"
+            dt     = v.get("date", "")
+            rating = v.get("rating", "")
+            part   = broker + " " + t_str
+            if rating:
+                part += " (" + rating + ")"
+            if dt:
+                part += " [" + dt + "]"
+            src_parts.append(part)
+        source_str = "、".join(src_parts)
         return {
-            "target": round(mean_f, 0),
-            "high":   round(float(hi), 0) if hi else None,
-            "low":    round(float(lo), 0) if lo else None,
-            "count":  int(cnt) if cnt else 0,
-            "source": "Gemini法人搜尋（" + src + "）",
+            "target":  mean_tp,
+            "high":    high_tp,
+            "low":     low_tp,
+            "count":   len(valid),
+            "source":  "Gemini搜尋 | " + source_str,
+            "details": valid,
         }
     except Exception as ex:
         print("【DEBUG】Gemini目標價失敗 " + sid + ": " + str(ex))
@@ -1116,7 +1140,7 @@ def analyze(sid, token, disposed, full_delivery, delisting, gemini_del, force=Fa
         rev=get_rev(sid,token); rev_yoy=None; rev_mom=None
         if len(rev)>=13 and rev[-13]["rev"]>0: rev_yoy=round((rev[-1]["rev"]-rev[-13]["rev"])/rev[-13]["rev"]*100,1)
         if len(rev)>=2 and rev[-2]["rev"]>0:   rev_mom=round((rev[-1]["rev"]-rev[-2]["rev"])/rev[-2]["rev"]*100,1)
-        tp=None; ts="未取得"; tp_h=None; tp_l=None; tp_n=0
+        tp=None; ts="未取得"; tp_h=None; tp_l=None; tp_n=0; _tp_details=[]
         # ── 目標價四段備援：Yahoo → FinMind → 網頁抓取 → Gemini → PE估算 ──
         ya = get_yahoo_target(sid)
         if ya:
@@ -1140,6 +1164,7 @@ def analyze(sid, token, disposed, full_delivery, delisting, gemini_del, force=Fa
                     ga = get_gemini_target(sid, nm(sid), p, _gkey)
                     if ga:
                         tp=ga["target"]; tp_h=ga["high"]; tp_l=ga["low"]; tp_n=ga["count"]; ts=ga["source"]
+                    _tp_details=ga.get("details",[])
             # ④ PE均值×成長估算（最後備援）
             if not tp and pea and pe and rev_yoy is not None and pe>0:
                 tp=round(p*(pea/pe)*min(max(1+rev_yoy/100,0.7),1.8),0); ts="PE均值×成長估算"
@@ -1174,7 +1199,7 @@ def analyze(sid, token, disposed, full_delivery, delisting, gemini_del, force=Fa
                 "tp":tp,"ts":ts,"tp_h":tp_h,"tp_l":tp_l,"tp_n":tp_n,
                 "score":sc,"rating":rt,"label":lb,"pos":pos,"neg":neg,"warn":warn,
                 "is_disposed":is_disposed,"is_full_del":is_full_del,
-                "is_delisting":is_delisting,"is_hard_risk":is_hard_risk,"date":last["date"]}
+                "is_delisting":is_delisting,"is_hard_risk":is_hard_risk,"date":last["date"],"tp_details":_tp_details}
         save_cache(sid,result); return result,None
     except Exception as e: return None,str(e)
 
@@ -1269,13 +1294,34 @@ def build_wiwynn(r):
             upbox=f'<div class="bw" style="margin-top:7px">🟡 現價超均值但距最高目標+{up_to_high:.1f}%</div>'
         else:
             upbox=f'<div class="bo" style="margin-top:7px">✅ 距最高分析師目標+{up_to_high:.1f}%，風險報酬比良好</div>'
+        # ── 個別券商報告明細（Gemini 搜尋結果）────────────────
+        tp_details = r.get('tp_details', [])
+        detail_rows = ''
+        if tp_details:
+            detail_rows += '<div style="margin-top:9px;border-top:1px solid #3d5166;padding-top:8px">'
+            detail_rows += '<p style="font-size:10px;font-weight:600;color:#8fa3b8;margin-bottom:6px">📋 各券商研究報告</p>'
+            for d in tp_details:
+                broker = str(d.get('broker','未知'))
+                t_val  = d.get('target', 0)
+                rating = str(d.get('rating',''))
+                dt     = str(d.get('date',''))
+                t_clr  = '#4ecca3' if float(t_val or 0) >= p else '#ff6b6b'
+                rat_html = ('<span style="font-size:9px;background:#27ae6033;color:#4ecca3;'
+                            'padding:1px 5px;border-radius:99px;margin-left:4px">' + rating + '</span>') if rating else ''
+                dt_html  = ('<span style="font-size:9px;color:#8fa3b8;margin-left:4px">' + dt + '</span>') if dt else ''
+                detail_rows += ('<div style="display:flex;justify-content:space-between;'
+                                'align-items:center;padding:4px 0;border-bottom:1px solid #2c3e50">'
+                                '<span style="font-size:11px;color:#e8eaf0">' + broker + rat_html + dt_html + '</span>'
+                                '<span style="font-size:12px;font-weight:700;color:' + t_clr + '">' + str(int(float(t_val or 0))) + ' 元</span>'
+                                '</div>')
+            detail_rows += '</div>'
         tp_card=(f'<div class="card"><p class="ct">💰 目標價分析{cb}</p>'
                  f'<div class="row"><span class="rl">來源</span><span class="rv" style="font-size:11px;color:#8fa3b8">{ts_}</span></div>'
                  f'<div class="row"><span class="rl">分析師均值</span><span class="rv {exc_cls}" style="font-size:15px;font-weight:700">{tp:,.0f} 元</span></div>'
                  +_tp_hi+_tp_lo+
                  f'<div class="row"><span class="rl">vs 現價（均值）</span><span class="rv" style="color:{"#ff6b6b" if exceed_avg else "#4ecca3"}">{up_to_avg:+.1f}%</span></div>'
                  f'<div class="row"><span class="rl">vs 現價（最高⭐）</span><span class="rv {exc_cls}"><strong>{up_to_high:+.1f}%</strong></span></div>'
-                 +rng_bar+upbox+f'</div>')
+                 +rng_bar+upbox+detail_rows+f'</div>')
     mc=ccc(rm or 0); yc=ccc(ry or 0)
     m_c=f"<div class='rf'><p>月營收MoM</p><p class='{mc}'>{(rm or 0):+.1f}%</p></div>" if rm is not None else ""
     y_c=f"<div class='rf'><p>月營收YoY</p><p class='{yc}'>{(ry or 0):+.1f}%</p></div>" if ry is not None else ""
