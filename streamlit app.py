@@ -986,16 +986,54 @@ def get_gemini_target(sid: str, name: str, price: float, gkey: str):
         except Exception:
             response = client.models.generate_content(
                 model=GEMINI_MODEL, contents=prompt)
-        if not response:
+        if not response or not getattr(response, "text", None):
             return None
+        # 清除 markdown 格式
         text = re.sub(r"```[a-z]*", "", response.text)
         text = re.sub(r"```", "", text).strip()
-        m2 = re.search(r"\{.*\}", text, re.DOTALL)
-        if not m2:
+        # 多重策略解析 JSON（應對 Gemini 各種回傳格式）
+        data = None
+        # 策略①：直接解析整段文字
+        try:
+            data = json.loads(text)
+        except Exception:
+            pass
+        # 策略②：用堆疊法找最外層 JSON 物件（支援嵌套）
+        if not data:
+            try:
+                stack = 0; start = -1
+                for ci, ch in enumerate(text):
+                    if ch == "{":
+                        if stack == 0: start = ci
+                        stack += 1
+                    elif ch == "}":
+                        stack -= 1
+                        if stack == 0 and start >= 0:
+                            data = json.loads(text[start:ci+1])
+                            break
+            except Exception:
+                pass
+        # 策略③：找所有 {...} 區塊逐一嘗試
+        if not data:
+            for mo in re.finditer(r"\{[^{}]+\}", text):
+                try:
+                    data = json.loads(mo.group())
+                    if data: break
+                except Exception:
+                    continue
+        if not data:
+            print("【DEBUG】Gemini回傳無法解析JSON " + sid + ": " + text[:200])
             return None
-        data = json.loads(m2.group())
         results = data.get("results", [])
+        # 相容性：若頂層直接是目標價欄位（非 results 包裝）
+        if not results and data.get("mean_target"):
+            mean_raw = data.get("mean_target")
+            if mean_raw and float(mean_raw) > 0:
+                results = [{"broker": data.get("source","Gemini"),
+                            "target": float(mean_raw),
+                            "rating": "", "date": ""}]
         if not results:
+            print("【DEBUG】Gemini結果 results 為空 " + sid)
             return None
         # 過濾合理目標價（不超過現價5倍、不低於1/5）
         valid = []
@@ -1295,25 +1333,33 @@ def build_wiwynn(r):
         else:
             upbox=f'<div class="bo" style="margin-top:7px">✅ 距最高分析師目標+{up_to_high:.1f}%，風險報酬比良好</div>'
         # ── 個別券商報告明細（Gemini 搜尋結果）────────────────
-        tp_details = r.get('tp_details', [])
+        # ── 個別券商報告明細（含完整防呆）────────────────────
+        _raw_details = r.get('tp_details', None)
+        tp_details = _raw_details if isinstance(_raw_details, list) else []
         detail_rows = ''
         if tp_details:
             detail_rows += '<div style="margin-top:9px;border-top:1px solid #3d5166;padding-top:8px">'
             detail_rows += '<p style="font-size:10px;font-weight:600;color:#8fa3b8;margin-bottom:6px">📋 各券商研究報告</p>'
             for d in tp_details:
-                broker = str(d.get('broker','未知'))
-                t_val  = d.get('target', 0)
-                rating = str(d.get('rating',''))
-                dt     = str(d.get('date',''))
-                t_clr  = '#4ecca3' if float(t_val or 0) >= p else '#ff6b6b'
-                rat_html = ('<span style="font-size:9px;background:#27ae6033;color:#4ecca3;'
-                            'padding:1px 5px;border-radius:99px;margin-left:4px">' + rating + '</span>') if rating else ''
-                dt_html  = ('<span style="font-size:9px;color:#8fa3b8;margin-left:4px">' + dt + '</span>') if dt else ''
-                detail_rows += ('<div style="display:flex;justify-content:space-between;'
-                                'align-items:center;padding:4px 0;border-bottom:1px solid #2c3e50">'
-                                '<span style="font-size:11px;color:#e8eaf0">' + broker + rat_html + dt_html + '</span>'
-                                '<span style="font-size:12px;font-weight:700;color:' + t_clr + '">' + str(int(float(t_val or 0))) + ' 元</span>'
-                                '</div>')
+                if not isinstance(d, dict):
+                    continue
+                try:
+                    broker = str(d.get('broker') or '未知')
+                    t_raw  = d.get('target', 0)
+                    t_val  = float(t_raw) if t_raw else 0.0
+                    rating = str(d.get('rating') or '')
+                    dt     = str(d.get('date') or '')
+                    t_clr  = '#4ecca3' if t_val >= p else '#ff6b6b'
+                    rat_html = ('<span style="font-size:9px;background:#27ae6033;color:#4ecca3;'
+                                'padding:1px 5px;border-radius:99px;margin-left:4px">' + rating + '</span>') if rating else ''
+                    dt_html  = ('<span style="font-size:9px;color:#8fa3b8;margin-left:4px">' + dt + '</span>') if dt else ''
+                    detail_rows += ('<div style="display:flex;justify-content:space-between;'
+                                    'align-items:center;padding:4px 0;border-bottom:1px solid #2c3e50">'
+                                    '<span style="font-size:11px;color:#e8eaf0">' + broker + rat_html + dt_html + '</span>'
+                                    '<span style="font-size:12px;font-weight:700;color:' + t_clr + '">' + str(int(t_val)) + ' 元</span>'
+                                    '</div>')
+                except Exception:
+                    continue
             detail_rows += '</div>'
         tp_card=(f'<div class="card"><p class="ct">💰 目標價分析{cb}</p>'
                  f'<div class="row"><span class="rl">來源</span><span class="rv" style="font-size:11px;color:#8fa3b8">{ts_}</span></div>'
