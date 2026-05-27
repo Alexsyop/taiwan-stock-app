@@ -833,33 +833,146 @@ def get_yahoo_target(sid):
 
 # ── 評分系統 v2.0 ─────────────────────────────────────────────
 
+@st.cache_data(ttl=14400)
+def get_finmind_target(sid: str, token: str):
+    """
+    從 FinMind TaiwanStockRecommend 取得法人目標價共識。
+    4 小時快取，避免重複 API 呼叫。
+    """
+    if not token or not sid:
+        return None
+    try:
+        start = (date.today() - timedelta(days=120)).strftime("%Y-%m-%d")
+        r = requests.get(
+            FINMIND_API,
+            params={"dataset": "TaiwanStockRecommend",
+                    "data_id": sid, "start_date": start, "token": token},
+            headers=HDR, timeout=15, verify=False)
+        if r.status_code != 200:
+            return None
+        data = r.json().get("data", [])
+        if not data:
+            return None
+        targets = []
+        for item in data:
+            for key in ("target_price", "TargetPrice", "targetPrice", "target"):
+                val = item.get(key)
+                if val and float(val) > 0:
+                    targets.append(float(val))
+                    break
+        if not targets:
+            return None
+        mean_tp = round(sum(targets) / len(targets), 0)
+        return {
+            "target": mean_tp,
+            "high":   round(max(targets), 0),
+            "low":    round(min(targets), 0),
+            "count":  len(targets),
+            "source": "FinMind法人共識（" + str(len(targets)) + "筆）",
+        }
+    except Exception as ex:
+        print("【DEBUG】FinMind目標價失敗 " + sid + ": " + str(ex))
+        return None
+
+def get_web_target(sid: str):
+    """
+    從 Goodinfo / MoneydJ 網頁抓取分析師目標價。
+    不需要 Token，每次即時抓取（已在 analyze 的檔案快取保護）。
+    """
+    web_headers = {
+        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
+        "Accept-Language": "zh-TW,zh;q=0.9",
+        "Referer": "https://goodinfo.tw/",
+    }
+    # ── 嘗試 Goodinfo 券商評等/目標價 ─────────────────────────
+    try:
+        url = "https://goodinfo.tw/tw/StockBuySellFromBroker.aspx?STOCK_ID=" + sid
+        r = requests.get(url, headers=web_headers, timeout=10, verify=False)
+        if r.status_code == 200:
+            text = r.text
+            # 搜尋目標價數字（通常格式：目標價 XXX 元 或 Target XXX）
+            patterns = [
+                r"目標價[\s:：]*([0-9,]+(?:\.[0-9]+)?)",
+                r"Target[\s:：]*([0-9,]+(?:\.[0-9]+)?)",
+                r"TP[\s:：=]*([0-9,]+(?:\.[0-9]+)?)",
+            ]
+            found = []
+            for pat in patterns:
+                for m in re.finditer(pat, text):
+                    val = float(m.group(1).replace(",", ""))
+                    if 10 < val < 100000:
+                        found.append(val)
+            if found:
+                mean_tp = round(sum(found) / len(found), 0)
+                return {
+                    "target": mean_tp,
+                    "high":   round(max(found), 0),
+                    "low":    round(min(found), 0),
+                    "count":  len(found),
+                    "source": "Goodinfo券商目標價（" + str(len(found)) + "筆）",
+                }
+    except Exception:
+        pass
+    # ── 嘗試 MoneydJ 股票分析 ──────────────────────────────────
+    try:
+        url = "https://www.moneydj.com/us/sta/staqad01.djhtm?A=" + sid
+        r = requests.get(url, headers={**web_headers, "Referer": "https://www.moneydj.com/"},
+                         timeout=10, verify=False)
+        if r.status_code == 200:
+            text = r.text
+            patterns = [
+                r"目標價[\s:：]*([0-9,]+(?:\.[0-9]+)?)",
+                r"合理價[\s:：]*([0-9,]+(?:\.[0-9]+)?)",
+            ]
+            found = []
+            for pat in patterns:
+                for m in re.finditer(pat, text):
+                    val = float(m.group(1).replace(",", ""))
+                    if 10 < val < 100000:
+                        found.append(val)
+            if found:
+                mean_tp = round(sum(found) / len(found), 0)
+                return {
+                    "target": mean_tp,
+                    "high":   round(max(found), 0),
+                    "low":    round(min(found), 0),
+                    "count":  len(found),
+                    "source": "MoneydJ目標價（" + str(len(found)) + "筆）",
+                }
+    except Exception:
+        pass
+    return None
+
 def get_gemini_target(sid: str, name: str, price: float, gkey: str):
     """
-    Gemini 搜尋法人分析師目標價（Yahoo Finance 無資料時備援）。
-    回傳格式與 get_yahoo_target 相同。
+    Gemini + Google Search 搜尋法人分析師目標價（強化版 prompt）。
     """
     if not gkey or not sid:
         return None
     try:
         from google import genai
         client = genai.Client(api_key=gkey)
-        stock_label = name + "（" + sid + "）"
-        price_str   = str(int(price)) + " 元"
+        price_str = str(int(price))
         prompt = (
-            "請搜尋台灣上市股票" + stock_label + "最新的法人分析師目標價。"
-            " 目前股價約 " + price_str + "。"
-            " 請搜尋各大券商研究報告"
-            "（外資：摩根士丹利、高盛、花旗、UBS、麥格理；"
-            " 本土：元大、凱基、富邦、永豐金等）公布的目標價，彙整為共識。"
-            " 只回傳 JSON，不要 markdown："
-            '{"mean_target": 平均目標價數字,'
-            ' "high_target": 最高目標價數字,'
-            ' "low_target": 最低目標價數字,'
-            ' "analyst_count": 分析師人數數字,'
-            ' "source": "來源說明"}  '
-            " 若找不到資料只回傳 null_json：{}"
+            "你是台灣股票研究員，請用 Google Search 搜尋以下股票的最新法人目標價。"
+            "股票：" + name + " 股號 " + sid
+            + " 目前股價 " + price_str + " 元。"
+            "請特別搜尋："
+            "1. 外資大摩(Morgan Stanley)、高盛(Goldman Sachs)、花旗(Citi)、"
+            "瑞銀(UBS)、麥格理(Macquarie)、巴克萊(Barclays)、匯豐(HSBC)"
+            "2. 本土元大、凱基、富邦、統一、永豐金、國泰、兆豐"
+            "的2024或2025年研究報告目標價（Target Price / 目標價 / TP）。"
+            "注意：只搜尋「目標價」，不要用現在股價當目標價。"
+            "回傳格式（只回傳 JSON，不含 markdown）："
+            "{"
+            "  \"mean_target\": 所有目標價的平均（數字），"
+            "  \"high_target\": 最高目標價（數字），"
+            "  \"low_target\": 最低目標價（數字），"
+            "  \"analyst_count\": 找到的筆數，"
+            "  \"source\": \"具體來源，例如：摩根士丹利900元、元大850元\""
+            "}"
+            "若真的完全找不到任何目標價資料，回傳空物件 {}"
         )
-        # 優先啟用 Google Search grounding 取得最新報告
         response = None
         try:
             from google.genai import types
@@ -872,25 +985,29 @@ def get_gemini_target(sid: str, name: str, price: float, gkey: str):
                 model=GEMINI_MODEL, contents=prompt)
         if not response:
             return None
-        text = response.text.strip()
-        text = re.sub(r"```[a-z]*", "", text)
+        text = re.sub(r"```[a-z]*", "", response.text)
         text = re.sub(r"```",       "", text).strip()
-        m2 = re.search(r"\{.*\}", text, re.DOTALL)
+        m2 = re.search(r"\{[^{}]*\}", text, re.DOTALL)
         if not m2:
             return None
         data = json.loads(m2.group())
         mean = data.get("mean_target")
         if not mean or float(mean) <= 0:
             return None
-        hi    = data.get("high_target") or mean
-        lo    = data.get("low_target")  or mean
-        count = data.get("analyst_count", 0)
-        src   = str(data.get("source", "Gemini整合"))
+        # 合理性檢查：目標價不應距離現價超過5倍或低於1/5
+        mean_f = float(mean)
+        if price > 0 and (mean_f > price * 5 or mean_f < price * 0.2):
+            print("【DEBUG】Gemini目標價不合理（" + str(mean_f) + " vs 現價" + price_str + "），捨棄")
+            return None
+        hi  = data.get("high_target") or mean
+        lo  = data.get("low_target")  or mean
+        cnt = data.get("analyst_count", 0)
+        src = str(data.get("source", "Gemini整合"))
         return {
-            "target": round(float(mean), 0),
+            "target": round(mean_f, 0),
             "high":   round(float(hi), 0) if hi else None,
             "low":    round(float(lo), 0) if lo else None,
-            "count":  int(count) if count else 0,
+            "count":  int(cnt) if cnt else 0,
             "source": "Gemini法人搜尋（" + src + "）",
         }
     except Exception as ex:
@@ -1000,19 +1117,30 @@ def analyze(sid, token, disposed, full_delivery, delisting, gemini_del, force=Fa
         if len(rev)>=13 and rev[-13]["rev"]>0: rev_yoy=round((rev[-1]["rev"]-rev[-13]["rev"])/rev[-13]["rev"]*100,1)
         if len(rev)>=2 and rev[-2]["rev"]>0:   rev_mom=round((rev[-1]["rev"]-rev[-2]["rev"])/rev[-2]["rev"]*100,1)
         tp=None; ts="未取得"; tp_h=None; tp_l=None; tp_n=0
-        # ── 目標價：Yahoo Finance → Gemini 搜尋 → PE 估算 三段式備援 ──
-        ya=get_yahoo_target(sid)
+        # ── 目標價四段備援：Yahoo → FinMind → 網頁抓取 → Gemini → PE估算 ──
+        ya = get_yahoo_target(sid)
         if ya:
             tp=ya["target"]; tp_h=ya["high"]; tp_l=ya["low"]; tp_n=ya["count"]; ts=ya["source"]
         else:
-            # Yahoo 無資料 → 嘗試 Gemini 搜尋法人目標價
-            _gkey = st.session_state.get("gemini_key", "")
-            if _gkey:
-                time.sleep(0.5)  # 避免 Gemini 頻率限制
-                ga = get_gemini_target(sid, nm(sid), p, _gkey)
-                if ga:
-                    tp=ga["target"]; tp_h=ga["high"]; tp_l=ga["low"]; tp_n=ga["count"]; ts=ga["source"]
-            # 仍無目標價 → PE 均值×成長估算（最後備援）
+            # ① FinMind 法人共識（需要 Token）
+            if token:
+                fa = get_finmind_target(sid, token)
+                if fa:
+                    tp=fa["target"]; tp_h=fa["high"]; tp_l=fa["low"]; tp_n=fa["count"]; ts=fa["source"]
+            # ② 網頁抓取（Goodinfo / MoneydJ，不需 Token）
+            if not tp:
+                wa = get_web_target(sid)
+                if wa:
+                    tp=wa["target"]; tp_h=wa["high"]; tp_l=wa["low"]; tp_n=wa["count"]; ts=wa["source"]
+            # ③ Gemini 搜尋（需要 Gemini Key）
+            if not tp:
+                _gkey = st.session_state.get("gemini_key", "")
+                if _gkey:
+                    time.sleep(0.5)
+                    ga = get_gemini_target(sid, nm(sid), p, _gkey)
+                    if ga:
+                        tp=ga["target"]; tp_h=ga["high"]; tp_l=ga["low"]; tp_n=ga["count"]; ts=ga["source"]
+            # ④ PE均值×成長估算（最後備援）
             if not tp and pea and pe and rev_yoy is not None and pe>0:
                 tp=round(p*(pea/pe)*min(max(1+rev_yoy/100,0.7),1.8),0); ts="PE均值×成長估算"
         sc,rt,lb,pos,neg,warn=calc_quant_score(p,d5,d200,fc,tc,pe,pea,rev_yoy,tp,
