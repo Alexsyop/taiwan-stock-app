@@ -593,23 +593,11 @@ body{background:#1a2332;color:#e8eaf0;font-family:'Helvetica Neue',Arial,sans-se
 @st.cache_data(ttl=86400)
 def fetch_official_sectors(token: str = "") -> dict:
     mapping = {}
-    
-    # ── 💡 萬用保底庫：確保即使全市場被封鎖，核心權值股絕不失蹤 ──
-    fallback_map = {
-        "2330": "半導體", "2303": "半導體", "2454": "半導體", "5347": "半導體", "3711": "半導體",
-        "2317": "其他電子", "2382": "電腦及週邊設備", "3231": "電腦及週邊設備", "2356": "電腦及週邊設備", 
-        "6669": "電腦及週邊設備", "2376": "電腦及週邊設備",
-        "2327": "電子零組件", "2308": "電子零組件", "3037": "電子零組件",
-        "2603": "航運", "2609": "航運", "2615": "航運",
-        "2881": "金融保險", "2891": "金融保險",
-        "3105": "半導體", "6770": "半導體"
-    }
-    mapping.update(fallback_map)
-    
+
     def clean_name(name):
         return name.replace("工業", "").replace("業", "") if len(name) > 2 else name
 
-    # 1. 優先使用 FinMind 
+    # 1. 優先使用 FinMind（最穩定，且包含興櫃產業）
     if token:
         try:
             r = requests.get(
@@ -617,107 +605,46 @@ def fetch_official_sectors(token: str = "") -> dict:
                 params={"dataset": "TaiwanStockInfo", "token": token},
                 headers=HDR, timeout=25, verify=False)
             if r.status_code == 200:
-                payload = r.json()
-                data = payload.get("data", [])
-                if data:
-                    for item in data:
-                        code = str(item.get("stock_id", "")).strip()
-                        ind  = str(item.get("industry_category", "")).strip()
-                        if code and ind and ind not in ("None", ""):
-                            mapping[code] = clean_name(ind)
-                else:
-                    st.error(f"⚠️ FinMind Token 驗證成功，但未回傳產業資料（回傳內容：{payload}）")
-            else:
-                st.error(f"⚠️ FinMind 產業 API 連線失敗，狀態碼：{r.status_code}")
-        except Exception as e:
-            st.error(f"⚠️ FinMind 產業 API 異常：{e}")
-
-    # 💡 關鍵安全閥：如果總筆數小於 1000 筆（代表 FinMind 失敗或資料殘缺），強制執行開源 API 補全
-    if len(mapping) < 1000:
-        # 2. Fallback：TWSE (上市)
-        try:
-            r = requests.get(
-                "https://openapi.twse.com.tw/v1/opendata/t187ap03_L",
-                headers=HDR, timeout=25, verify=False)
-            if r.status_code == 200:
-                for item in r.json():
-                    code = str(item.get("公司代號", "")).strip()
-                    ind  = str(item.get("產業類別", "")).strip()
-                    if code and ind:
-                        mapping[code] = clean_name(ind)
-            else:
-                st.warning(f"⚠️ 證交所(上市)產業 API 遭阻擋，狀態碼：{r.status_code}。")
-        except Exception:
-            pass
-
-        # 3. Fallback：TPEx (上櫃)
-        try:
-            r = requests.get(
-                "https://www.tpex.org.tw/openapi/v1/tpex_listed_companies",
-                headers=HDR, timeout=25, verify=False)
-            if r.status_code == 200:
-                for item in r.json():
-                    code = str(item.get("SecuritiesCompanyCode", "")).strip()
-                    ind  = str(item.get("Industry", "")).strip()
-                    if code and ind:
+                for item in r.json().get("data", []):
+                    code = str(item.get("stock_id", "")).strip()
+                    ind  = str(item.get("industry_category", "")).strip()
+                    if code and ind and ind not in ("None", ""):
                         mapping[code] = clean_name(ind)
         except Exception:
             pass
+
+    if mapping:
+        return mapping  # FinMind 成功則直接回傳
+
+    # 2. Fallback：TWSE
+    try:
+        r = requests.get(
+            "https://openapi.twse.com.tw/v1/opendata/t187ap03_L",
+            headers=HDR, timeout=25, verify=False)
+        if r.status_code == 200:
+            for item in r.json():
+                code = str(item.get("公司代號", "")).strip()
+                ind  = str(item.get("產業類別", "")).strip()
+                if code and ind:
+                    mapping[code] = clean_name(ind)
+    except Exception:
+        pass
+
+    # 3. Fallback：TPEx
+    try:
+        r = requests.get(
+            "https://www.tpex.org.tw/openapi/v1/tpex_listed_companies",
+            headers=HDR, timeout=25, verify=False)
+        if r.status_code == 200:
+            for item in r.json():
+                code = str(item.get("SecuritiesCompanyCode", "")).strip()
+                ind  = str(item.get("Industry", "")).strip()
+                if code and ind:
+                    mapping[code] = clean_name(ind)
+    except Exception:
+        pass
 
     return mapping
-    # mapping = {}
-
-    # def clean_name(name):
-    #     return name.replace("工業", "").replace("業", "") if len(name) > 2 else name
-
-    # # 1. 優先使用 FinMind（最穩定，且包含興櫃產業）
-    # if token:
-    #     try:
-    #         r = requests.get(
-    #             FINMIND_API,
-    #             params={"dataset": "TaiwanStockInfo", "token": token},
-    #             headers=HDR, timeout=25, verify=False)
-    #         if r.status_code == 200:
-    #             for item in r.json().get("data", []):
-    #                 code = str(item.get("stock_id", "")).strip()
-    #                 ind  = str(item.get("industry_category", "")).strip()
-    #                 if code and ind and ind not in ("None", ""):
-    #                     mapping[code] = clean_name(ind)
-    #     except Exception:
-    #         pass
-
-    # if mapping:
-    #     return mapping  # FinMind 成功則直接回傳
-
-    # # 2. Fallback：TWSE
-    # try:
-    #     r = requests.get(
-    #         "https://openapi.twse.com.tw/v1/opendata/t187ap03_L",
-    #         headers=HDR, timeout=25, verify=False)
-    #     if r.status_code == 200:
-    #         for item in r.json():
-    #             code = str(item.get("公司代號", "")).strip()
-    #             ind  = str(item.get("產業類別", "")).strip()
-    #             if code and ind:
-    #                 mapping[code] = clean_name(ind)
-    # except Exception:
-    #     pass
-
-    # # 3. Fallback：TPEx
-    # try:
-    #     r = requests.get(
-    #         "https://www.tpex.org.tw/openapi/v1/tpex_listed_companies",
-    #         headers=HDR, timeout=25, verify=False)
-    #     if r.status_code == 200:
-    #         for item in r.json():
-    #             code = str(item.get("SecuritiesCompanyCode", "")).strip()
-    #             ind  = str(item.get("Industry", "")).strip()
-    #             if code and ind:
-    #                 mapping[code] = clean_name(ind)
-    # except Exception:
-    #     pass
-
-    # return mapping
 
 
 @st.cache_data(ttl=3600)
@@ -763,156 +690,47 @@ def fetch_delisting_cached():
 
 # ── 全市場數據 ────────────────────────────────────────────────
 @st.cache_data(ttl=14400)
-def _fetch_prices_finmind(token: str, market: str = "ALL") -> dict:
-    """用 FinMind 抓全市場當日收盤（需 token）。market='TWSE'/'TPEx'/'ALL'"""
-    if not token:
-        return {}
-    now_tw = datetime.utcnow() + timedelta(hours=8)
-    trade_d = (now_tw.date()-timedelta(days=1)) if now_tw.hour < 14 else now_tw.date()
-    while trade_d.weekday() >= 5:
-        trade_d -= timedelta(days=1)
-    ds = trade_d.strftime("%Y-%m-%d")
+def fetch_twse_prices_all():
     out = {}
     try:
-        r = requests.get(FINMIND_API, headers=HDR, timeout=30, verify=False,
-            params={"dataset":"TaiwanStockPrice","start_date":ds,"end_date":ds,"token":token})
-        if r.status_code != 200:
-            return {}
-        for row in r.json().get("data", []):
-            sid = str(row.get("stock_id","")).strip()
-            if not sid or not sid.isdigit(): continue
-            p  = ff(row.get("close", 0))
-            v  = fi(row.get("Trading_Volume", 0)) // 1000
-            op = ff(row.get("open", 0))
-            cp = round((p-op)/op*100, 2) if op > 0 else 0.0
-            nm_val = str(row.get("stock_id",""))  # FinMind 價格資料沒有名稱欄位
-            if p > 0:
-                out[sid] = {"price":p,"volume":v,"chg_pct":cp,"name":nm_val}
-    except Exception:
-        pass
-    return out
-
-@st.cache_data(ttl=14400)
-def fetch_twse_prices_all():
-    """
-    上市股價。優先 TWSE OpenAPI，若被封(403)則由呼叫端用 FinMind 補。
-    回傳 dict 可能為空，tab_scanner 會自動處理。
-    """
-    out = {}
-    for url in [
-        "https://openapi.twse.com.tw/v1/exchangeReport/STOCK_DAY_ALL",
-        "https://openapi.twse.com.tw/v1/exchangeReport/BWIBBU_ALL",
-    ]:
-        try:
-            r = requests.get(url, headers=HDR, timeout=20, verify=False)
-            if r.status_code != 200: continue
-            data = r.json()
-            if not isinstance(data, list) or len(data) < 10: continue
-            for item in data:
-                sid = str(item.get("Code","")).strip()
+        r=requests.get("https://openapi.twse.com.tw/v1/exchangeReport/STOCK_DAY_ALL",headers=HDR,timeout=20,verify=False)
+        if r.status_code==200:
+            for item in r.json():
+                sid=str(item.get("Code","")).strip()
                 if not sid or not sid.isdigit(): continue
-                p   = ff(str(item.get("ClosingPrice","0")).replace(",",""))
-                v   = fi(str(item.get("TradeVolume","0")).replace(",",""))
-                chg = ff(str(item.get("Change","")).replace("+","").replace(",",""))
-                prev = p - chg if p else None
-                cp   = round(chg/prev*100, 2) if prev and prev > 0 else 0.0
-                if p > 0:
-                    out[sid] = {"price":p,"volume":v,"chg_pct":cp,"name":str(item.get("Name","")).strip()}
-            if len(out) > 200: return out
-        except Exception: continue
+                p=ff(str(item.get("ClosingPrice","0")).replace(",",""))
+                v=fi(str(item.get("TradeVolume","0")).replace(",",""))
+                chg=ff(str(item.get("Change","")).replace("+","").replace(",",""))
+                prev=p-chg if p else None; cp=round(chg/prev*100,2) if prev and prev>0 else 0.0
+                if p>0 and v>0:
+                    out[sid]={"price":p,"volume":v,"chg_pct":cp,"name":str(item.get("Name","")).strip()}
+    except Exception: pass
     return out
 
 @st.cache_data(ttl=14400)
 def fetch_twse_institution_all(qdate=""):
-    """TWSE T86 上市法人（動態抓取欄位版，免疫證交所改版）"""
     out = {}
     for trade_date in last_trading_days(5):
         ds = trade_date.strftime("%Y%m%d")
-        for url in [
-            f"https://www.twse.com.tw/rwd/zh/fund/T86?response=json&date={ds}&selectType=ALL",
-            f"https://www.twse.com.tw/fund/T86?response=json&date={ds}&selectType=ALL",
-        ]:
+        for url in [f"https://www.twse.com.tw/rwd/zh/fund/T86?response=json&date={ds}&selectType=ALL",
+                    f"https://www.twse.com.tw/fund/T86?response=json&date={ds}&selectType=ALL"]:
             try:
-                r = requests.get(url, headers=HDR, timeout=20, verify=False)
-                if r.status_code != 200: continue
-                d = r.json()
-                
-                if d.get("stat", "").lower() not in ("ok", "ok."): continue
-                
-                fields = d.get("fields", [])
-                rows = d.get("data", d.get("Data", []))
-                if not rows or not fields: continue
-                
-                # ── 💡 終極解法：動態尋找欄位位置，再也不怕證交所改版 ──
-                idx_code = 0
-                idx_f, idx_t, idx_d = -1, -1, -1
-                
-                for i, col in enumerate(fields):
-                    if col == "證券代號": idx_code = i
-                    elif col in ["外陸資買賣超股數(含外資自營商)", "外資及陸資買賣超股數"]: idx_f = i
-                    elif col == "投信買賣超股數": idx_t = i
-                    elif col == "自營商買賣超股數": idx_d = i
-                    # 備援判斷：若找不到總計，找替代欄位
-                    elif idx_f == -1 and col == "外陸資買賣超股數(不含外資自營商)": idx_f = i
-                    elif idx_d == -1 and col == "自營商買賣超股數(自行買賣)": idx_d = i
-
-                # 如果連外資、投信的名稱都找不到，代表格式被大改或遇到阻擋，直接回傳空字典讓 FinMind 啟動
-                if idx_f == -1 or idx_t == -1:
-                    return {}
-
-                parsed = 0
+                r=requests.get(url,headers=HDR,timeout=20,verify=False)
+                if r.status_code!=200: continue
+                d=r.json()
+                if d.get("stat","") not in ("OK","ok"): continue
+                rows=d.get("data",d.get("Data",[]))
+                if not rows or len(rows)<5: continue
                 for row in rows:
-                    try:
-                        sid = str(row[idx_code]).strip()
-                        if not sid.isdigit(): continue
-                        
-                        f_net = parse_tw(row[idx_f]) if len(row) > idx_f else 0
-                        t_net = parse_tw(row[idx_t]) if len(row) > idx_t else 0
-                        d_net = parse_tw(row[idx_d]) if idx_d != -1 and len(row) > idx_d else 0
-                        
-                        out[sid] = {"f": f_net // 1000, "t": t_net // 1000, "d": d_net // 1000}
-                        parsed += 1
-                    except Exception:
-                        continue
-                        
-                if parsed > 100: return out
-            except Exception:
-                continue
-        if len(out) > 100: break
+                    if len(row)<11: continue
+                    sid=str(row[0]).strip()
+                    if not sid.isdigit(): continue
+                    out[sid]={"f":parse_tw(row[7])//1000,"t":parse_tw(row[10])//1000,
+                               "d":parse_tw(row[14])//1000 if len(row)>14 else 0}
+                if len(out)>100: return out
+            except Exception: continue
+        if len(out)>100: break
     return out
-# def fetch_twse_institution_all(qdate=""):
-#     """TWSE T86 上市法人。Streamlit Cloud 常被封(403)，回傳空 dict 由呼叫端用 FinMind 補。"""
-#     out = {}
-#     for trade_date in last_trading_days(5):
-#         ds = trade_date.strftime("%Y%m%d")
-#         for url in [
-#             f"https://www.twse.com.tw/rwd/zh/fund/T86?response=json&date={ds}&selectType=ALL",
-#             f"https://www.twse.com.tw/fund/T86?response=json&date={ds}&selectType=ALL",
-#         ]:
-#             try:
-#                 r = requests.get(url, headers=HDR, timeout=20, verify=False)
-#                 if r.status_code != 200: continue
-#                 rows = r.json().get("data", r.json().get("Data", []))
-#                 if not rows or len(rows) < 5: continue
-#                 parsed = 0
-#                 for row in rows:
-#                     if len(row) < 5: continue
-#                     sid = str(row[0]).strip()
-#                     if not sid or not sid.isdigit(): continue
-#                     ncols = len(row)
-#                     if ncols >= 18:
-#                         f_net = parse_tw(row[4]); t_net = parse_tw(row[10])
-#                         d_net = parse_tw(row[13]) + parse_tw(row[16])
-#                     elif ncols >= 11:
-#                         f_net = parse_tw(row[4]); t_net = parse_tw(row[7]); d_net = parse_tw(row[10])
-#                     else:
-#                         f_net = parse_tw(row[4]); t_net = parse_tw(row[7]) if ncols>7 else 0; d_net = 0
-#                     out[sid] = {"f":f_net//1000,"t":t_net//1000,"d":d_net//1000}
-#                     parsed += 1
-#                 if parsed > 100: return out
-#             except Exception: continue
-#         if len(out) > 100: break
-#     return out
 
 @st.cache_data(ttl=14400)
 def fetch_tpex_prices_all():
@@ -949,81 +767,6 @@ def fetch_tpex_institution_all(qdate=""):
                            "d":parse_tw(row[18])//1000 if len(row)>18 else 0}
             if len(out)>50: return out
         except Exception: continue
-    return out
-
-# ── FinMind 批次法人（全市場，籌碼掃描主力） ─────────────────
-@st.cache_data(ttl=14400)
-def fetch_finmind_institution_all(token: str, qdate: str = "") -> dict:
-    """
-    用 FinMind 一次抓整個交易日所有股票的三大法人（上市+上櫃）。
-    回傳 {stock_id: {"f":外資張,"t":投信張,"d":自營張}}
-    只有 token 時才能使用。
-    """
-    if not token:
-        return {}
-    now_tw = datetime.utcnow() + timedelta(hours=8)
-    if not qdate:
-        d = (now_tw.date()-timedelta(days=1)) if now_tw.hour < 17 else now_tw.date()
-        while d.weekday() >= 5:
-            d -= timedelta(days=1)
-        qdate = d.strftime("%Y-%m-%d")
-    elif len(qdate) == 8 and "-" not in qdate:
-        qdate = f"{qdate[:4]}-{qdate[4:6]}-{qdate[6:]}"
-    try:
-        r = requests.get(FINMIND_API, headers=HDR, timeout=35, verify=False,
-            params={"dataset":"TaiwanStockInstitutionalInvestorsBuySell",
-                    "start_date":qdate,"end_date":qdate,"token":token})
-        if r.status_code != 200:
-            return {}
-        rows = r.json().get("data", [])
-        if not rows:
-            return {}
-        dm: dict = {}
-        for row in rows:
-            sid = str(row.get("stock_id","")).strip()
-            if not sid or not sid.isdigit(): continue
-            name = str(row.get("name",""))
-            net  = fi(row.get("buy",0)) - fi(row.get("sell",0))
-            if sid not in dm:
-                dm[sid] = {"f":0,"t":0,"d":0}
-            if "Foreign" in name or "外資" in name: dm[sid]["f"] += net
-            elif "Trust" in name or "投信" in name:  dm[sid]["t"] += net
-            elif "Dealer" in name or "自營" in name:  dm[sid]["d"] += net
-        return {sid:{"f":v["f"]//1000,"t":v["t"]//1000,"d":v["d"]//1000}
-                for sid,v in dm.items()}
-    except Exception:
-        return {}
-
-@st.cache_data(ttl=14400)
-def fetch_finmind_prices_all(token: str) -> dict:
-    """
-    用 FinMind 抓全市場當日收盤（需 token）。
-    附掛名稱查詢（從 _MARKET_NAMES 快取補）。
-    """
-    if not token:
-        return {}
-    now_tw = datetime.utcnow() + timedelta(hours=8)
-    trade_d = (now_tw.date()-timedelta(days=1)) if now_tw.hour < 14 else now_tw.date()
-    while trade_d.weekday() >= 5:
-        trade_d -= timedelta(days=1)
-    ds = trade_d.strftime("%Y-%m-%d")
-    out = {}
-    try:
-        r = requests.get(FINMIND_API, headers=HDR, timeout=35, verify=False,
-            params={"dataset":"TaiwanStockPrice","start_date":ds,"end_date":ds,"token":token})
-        if r.status_code != 200:
-            return {}
-        for row in r.json().get("data", []):
-            sid = str(row.get("stock_id","")).strip()
-            if not sid or not sid.isdigit(): continue
-            p  = ff(row.get("close", 0))
-            op = ff(row.get("open",  0))
-            v  = fi(row.get("Trading_Volume", 0)) // 1000
-            cp = round((p-op)/op*100, 2) if op > 0 else 0.0
-            if p > 0:
-                out[sid] = {"price":p,"volume":v,"chg_pct":cp,"name":nm(sid)}
-    except Exception:
-        pass
     return out
 
 # ── 個股 API ──────────────────────────────────────────────────
@@ -1070,23 +813,15 @@ def get_rev(sid, token):
     recs.sort(key=lambda x:(x["yr"],x["mo"])); return recs[-13:]
 
 def get_yahoo_target(sid):
-    """分析師目標價。用 fast_info 先確認股票存在，避免 404 log 噪音。"""
     try:
-        import yfinance as yf, pandas as _pd, logging
-        logging.getLogger("yfinance").setLevel(logging.CRITICAL)
+        import yfinance as yf, pandas as _pd
     except ImportError: return None
-    for suffix in [".TW", ".TWO"]:
+    for suffix in [".TW",".TWO"]:
         try:
-            ticker = yf.Ticker(f"{sid}{suffix}")
-            try:
-                fi2 = ticker.fast_info
-                currency = getattr(fi2,"currency",None) or fi2.get("currency") if hasattr(fi2,"get") else None
-                if not currency: continue
-            except Exception: continue
-            info = ticker.info or {}
+            info = yf.Ticker(f"{sid}{suffix}").info or {}
             if not info.get("regularMarketPrice"): continue
             mean = info.get("targetMeanPrice")
-            if mean and not _pd.isna(mean) and float(mean) > 0:
+            if mean and not _pd.isna(mean) and float(mean)>0:
                 count=info.get("numberOfAnalystOpinions"); hi=info.get("targetHighPrice"); lo=info.get("targetLowPrice")
                 return {"target":round(float(mean),2),
                         "high":round(float(hi),2) if hi and not _pd.isna(hi) else None,
@@ -1097,6 +832,71 @@ def get_yahoo_target(sid):
     return None
 
 # ── 評分系統 v2.0 ─────────────────────────────────────────────
+
+def get_gemini_target(sid: str, name: str, price: float, gkey: str):
+    """
+    Gemini 搜尋法人分析師目標價（Yahoo Finance 無資料時備援）。
+    回傳格式與 get_yahoo_target 相同。
+    """
+    if not gkey or not sid:
+        return None
+    try:
+        from google import genai
+        client = genai.Client(api_key=gkey)
+        stock_label = name + "（" + sid + "）"
+        price_str   = str(int(price)) + " 元"
+        prompt = (
+            "請搜尋台灣上市股票" + stock_label + "最新的法人分析師目標價。"
+            " 目前股價約 " + price_str + "。"
+            " 請搜尋各大券商研究報告"
+            "（外資：摩根士丹利、高盛、花旗、UBS、麥格理；"
+            " 本土：元大、凱基、富邦、永豐金等）公布的目標價，彙整為共識。"
+            " 只回傳 JSON，不要 markdown："
+            '{"mean_target": 平均目標價數字,'
+            ' "high_target": 最高目標價數字,'
+            ' "low_target": 最低目標價數字,'
+            ' "analyst_count": 分析師人數數字,'
+            ' "source": "來源說明"}  '
+            " 若找不到資料只回傳 null_json：{}"
+        )
+        # 優先啟用 Google Search grounding 取得最新報告
+        response = None
+        try:
+            from google.genai import types
+            cfg = types.GenerateContentConfig(
+                tools=[types.Tool(google_search=types.GoogleSearch())])
+            response = client.models.generate_content(
+                model=GEMINI_MODEL, contents=prompt, config=cfg)
+        except Exception:
+            response = client.models.generate_content(
+                model=GEMINI_MODEL, contents=prompt)
+        if not response:
+            return None
+        text = response.text.strip()
+        text = re.sub(r"```[a-z]*", "", text)
+        text = re.sub(r"```",       "", text).strip()
+        m2 = re.search(r"\{.*\}", text, re.DOTALL)
+        if not m2:
+            return None
+        data = json.loads(m2.group())
+        mean = data.get("mean_target")
+        if not mean or float(mean) <= 0:
+            return None
+        hi    = data.get("high_target") or mean
+        lo    = data.get("low_target")  or mean
+        count = data.get("analyst_count", 0)
+        src   = str(data.get("source", "Gemini整合"))
+        return {
+            "target": round(float(mean), 0),
+            "high":   round(float(hi), 0) if hi else None,
+            "low":    round(float(lo), 0) if lo else None,
+            "count":  int(count) if count else 0,
+            "source": "Gemini法人搜尋（" + src + "）",
+        }
+    except Exception as ex:
+        print("【DEBUG】Gemini目標價失敗 " + sid + ": " + str(ex))
+        return None
+
 def calc_quant_score(p, d5, d200, fc, tc, pe, pea, rev_yoy, tp,
                      tp_h=None, ma20=None, ma60=None, rev_mom=None, inst=None):
     sc=50; pos=[]; neg=[]; warn=[]
@@ -1200,10 +1000,21 @@ def analyze(sid, token, disposed, full_delivery, delisting, gemini_del, force=Fa
         if len(rev)>=13 and rev[-13]["rev"]>0: rev_yoy=round((rev[-1]["rev"]-rev[-13]["rev"])/rev[-13]["rev"]*100,1)
         if len(rev)>=2 and rev[-2]["rev"]>0:   rev_mom=round((rev[-1]["rev"]-rev[-2]["rev"])/rev[-2]["rev"]*100,1)
         tp=None; ts="未取得"; tp_h=None; tp_l=None; tp_n=0
+        # ── 目標價：Yahoo Finance → Gemini 搜尋 → PE 估算 三段式備援 ──
         ya=get_yahoo_target(sid)
-        if ya: tp=ya["target"]; tp_h=ya["high"]; tp_l=ya["low"]; tp_n=ya["count"]; ts=ya["source"]
-        elif pea and pe and rev_yoy is not None and pe>0:
-            tp=round(p*(pea/pe)*min(max(1+rev_yoy/100,0.7),1.8),0); ts="PE均值×成長估算"
+        if ya:
+            tp=ya["target"]; tp_h=ya["high"]; tp_l=ya["low"]; tp_n=ya["count"]; ts=ya["source"]
+        else:
+            # Yahoo 無資料 → 嘗試 Gemini 搜尋法人目標價
+            _gkey = st.session_state.get("gemini_key", "")
+            if _gkey:
+                time.sleep(0.5)  # 避免 Gemini 頻率限制
+                ga = get_gemini_target(sid, nm(sid), p, _gkey)
+                if ga:
+                    tp=ga["target"]; tp_h=ga["high"]; tp_l=ga["low"]; tp_n=ga["count"]; ts=ga["source"]
+            # 仍無目標價 → PE 均值×成長估算（最後備援）
+            if not tp and pea and pe and rev_yoy is not None and pe>0:
+                tp=round(p*(pea/pe)*min(max(1+rev_yoy/100,0.7),1.8),0); ts="PE均值×成長估算"
         sc,rt,lb,pos,neg,warn=calc_quant_score(p,d5,d200,fc,tc,pe,pea,rev_yoy,tp,
                                                 tp_h=tp_h,ma20=ma20,ma60=ma60,rev_mom=rev_mom,inst=inst)
         r52=pr[-252:] if len(pr)>=252 else pr
@@ -1512,93 +1323,201 @@ def compute_sector_stats(prices: dict, insts: dict,
     return stats
 
 def build_treemap_html(stocks, title):
-    if not stocks: return "<body style='background:#1a2332;color:#e8eaf0;padding:20px'>無數據</body>"
-    def chg_color(c):
-        if c>=9: return "#8b0000"
-        elif c>=6: return "#c0392b"
-        elif c>=3: return "#e74c3c"
-        elif c>=1: return "#ff6b6b"
-        elif c>0: return "#ff9999"
-        elif c==0: return "#2d3436"
-        elif c>-1: return "#aaffaa"
-        elif c>-3: return "#55efc4"
-        elif c>-6: return "#27ae60"
-        elif c>-9: return "#1e8449"
-        else: return "#145a32"
-    js_data=json.dumps([{"name":s.get("name",s.get("code","")),"code":s.get("code",""),
-                          "price":s.get("price",0),"chg":round(s.get("chg",0),2),
-                          "vol":max(s.get("vol",1),1),"color":chg_color(s.get("chg",0))}
-                         for s in stocks],ensure_ascii=False)
-    return f"""<!DOCTYPE html><html><head><meta charset="UTF-8">
-<style>*{{box-sizing:border-box;margin:0;padding:0}}body{{background:#1a2332;font-family:Arial}}
-#ti{{color:#e8eaf0;font-size:13px;font-weight:700;padding:8px 12px}}
-#tm{{position:relative;width:100%;height:450px;overflow:hidden}}
-.c{{position:absolute;display:flex;flex-direction:column;align-items:center;justify-content:center;
-    border:1px solid #1a2332;border-radius:3px;overflow:hidden;cursor:default}}
-.c:hover{{opacity:.85;z-index:10}}
-.c .n{{font-size:12px;font-weight:700;color:#fff;text-shadow:1px 1px 2px rgba(0,0,0,.9);
-       white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:95%}}
-.c .p{{font-size:11px;color:#fff;text-shadow:1px 1px 2px rgba(0,0,0,.9)}}
-.lg{{display:flex;flex-direction:column;align-items:center;padding:6px 0}}
-.lb{{width:280px;height:12px;border-radius:6px;
-     background:linear-gradient(90deg,#145a32,#27ae60,#2d3436,#e74c3c,#8b0000)}}
-.ll{{display:flex;justify-content:space-between;width:280px;font-size:10px;color:#8fa3b8;margin-top:2px}}</style>
-</head><body>
-<div id="ti">🌡️ {title}（方塊大小=成交量，🔴漲🟢跌）</div>
-<div id="tm"></div>
-<div class="lg"><div class="lb"></div><div class="ll"><span>-10%+</span><span>-5%</span><span>平盤</span><span>+5%</span><span>+10%+</span></div></div>
-<script>
-const D={js_data};
-const ct=document.getElementById('tm');
-function layout(items,x,y,w,h){{
-  const total=items.reduce((s,d)=>s+d.vol,0)||1;
-  const cells=[]; let row=[],rv=0,cx=x,cy=y,rw=w,rh=h;
-  function place(row,rv,px,py,pw,ph){{
-    const short=Math.min(pw,ph),side=rv/total*(pw*ph)/short;
-    let ox=px,oy=py;
-    for(const r of row){{
-      const f=r.vol/rv;
-      if(pw<=ph){{cells.push({{...r,x:ox,y:oy,w:side,h:f*short}});oy+=f*short;}}
-      else{{cells.push({{...r,x:ox,y:oy,w:f*side,h:short}});ox+=f*side;}}
-    }}
-    return side;
-  }}
-  for(let i=0;i<items.length;i++){{
-    const d=items[i];
-    if(!row.length){{row.push(d);rv+=d.vol;}}
-    else{{
-      const tv=rv+d.vol,short=Math.min(rw,rh);
-      const side=tv/total*(rw*rh)/short;
-      const testAsp=Math.max(...[...row,d].map(r=>{{const f=r.vol/tv;const rl=f*(rw<=rh?rh:rw)*short/side;return Math.max(side/rl,rl/side);}}));
-      const currAsp=Math.max(...row.map(r=>{{const f=r.vol/rv;const sl=rv/total*(rw*rh)/short;const rl=f*(rw<=rh?rh:rw)*short/sl;return Math.max(sl/rl,rl/sl);}}));
-      if(testAsp<=currAsp){{row.push(d);rv+=d.vol;}}
-      else{{
-        const s=place(row,rv,cx,cy,rw,rh);
-        if(rw<=rh){{cy+=s;rh-=s;}}else{{cx+=s;rw-=s;}}
-        row=[d];rv=d.vol;
-      }}
-    }}
-    if(i===items.length-1&&row.length)place(row,rv,cx,cy,rw,rh);
-  }}
-  return cells;
-}}
-function render(){{
-  const W=ct.offsetWidth||800,H=450;
-  const sorted=[...D].sort((a,b)=>b.vol-a.vol);
-  const cells=layout(sorted,0,0,W,H);
-  ct.innerHTML='';
-  cells.forEach(c=>{{
-    const div=document.createElement('div');
-    div.className='c';
-    div.style.cssText=`left:${{Math.round(c.x+1)}}px;top:${{Math.round(c.y+1)}}px;width:${{Math.max(Math.round(c.w-2),2)}}px;height:${{Math.max(Math.round(c.h-2),2)}}px;background:${{c.color}}`;
-    div.title=c.name+' '+c.code+'\\n'+c.price+'元 '+(c.chg>=0?'+':'')+c.chg+'%';
-    const sign=c.chg>=0?'+':'';
-    if(c.w>50&&c.h>35)div.innerHTML=(c.w>70&&c.h>50?`<div class="n">${{c.name}}</div>`:'')+`<div class="p">${{sign}}${{c.chg.toFixed(1)}}%</div>`;
-    ct.appendChild(div);
-  }});
-}}
-render();window.addEventListener('resize',render);
-</script></body></html>"""
+    """
+    專業熱力圖：Squarify 演算法 + Top20/其他合併 + 成交值/量切換。
+    台股慣例：🔴漲 🟢跌。只動此函式，其他程式碼不變。
+    """
+    if not stocks:
+        return "<body style='background:#1a2332;color:#e8eaf0;padding:20px'>無數據</body>"
+
+    js_data = json.dumps([{
+        "name":  s.get("name", s.get("code", "")),
+        "code":  s.get("code", ""),
+        "price": s.get("price", 0),
+        "chg":   round(s.get("chg", 0), 2),
+        "vol":   max(s.get("vol", 1), 1),
+    } for s in stocks], ensure_ascii=False)
+
+    title_esc = title.replace('"', '&quot;')
+
+    CSS = (
+        "*{box-sizing:border-box;margin:0;padding:0}"
+        "body{background:#1a2332;font-family:'Helvetica Neue',Arial,sans-serif}"
+        "#hdr{display:flex;align-items:center;gap:8px;padding:8px 12px;"
+        "     flex-wrap:wrap;border-bottom:1px solid #2c3e50}"
+        "#ti{color:#e8eaf0;font-size:13px;font-weight:700;flex-shrink:0}"
+        ".tb{background:#2c3e50;border:1px solid #3d5166;color:#8fa3b8;"
+        "    padding:3px 13px;border-radius:99px;cursor:pointer;font-size:12px;transition:all .15s}"
+        ".tb.on{background:#27ae60;border-color:#27ae60;color:#fff;font-weight:600}"
+        "#hint{font-size:11px;color:#8fa3b8;margin-left:auto}"
+        "#tm{position:relative;width:100%;height:450px;overflow:hidden;background:#1a2332}"
+        ".c{position:absolute;display:flex;flex-direction:column;align-items:center;"
+        "   justify-content:center;border:1px solid #1a2332;border-radius:3px;"
+        "   overflow:hidden;cursor:default;transition:opacity .12s}"
+        ".c:hover{opacity:.82;z-index:10}"
+        ".c .cn{font-size:12px;font-weight:700;color:#fff;"
+        "       text-shadow:1px 1px 2px rgba(0,0,0,.9);"
+        "       white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:94%}"
+        ".c .cp{font-size:11px;color:#fff;text-shadow:1px 1px 2px rgba(0,0,0,.9)}"
+        ".c .cx{font-size:10px;color:rgba(255,255,255,.72)}"
+        ".lg{display:flex;flex-direction:column;align-items:center;padding:5px 0}"
+        ".lb{width:280px;height:10px;border-radius:6px;"
+        "    background:linear-gradient(90deg,#145a32,#27ae60,#2d3436,#e74c3c,#8b0000)}"
+        ".ll{display:flex;justify-content:space-between;width:280px;"
+        "    font-size:10px;color:#8fa3b8;margin-top:2px}"
+    )
+
+    # JS 以字串拼接，避免 Python f-string 與 JS 大括號衝突
+    JS = (
+        "const RAW=" + js_data + ";\n"
+        "let MODE='amt';\n"
+        "const DATA=RAW.map(d=>Object.assign({},d,{amt:Math.round(d.price*d.vol)}));\n"
+        "\n"
+        "function getColor(c){\n"
+        "  if(c>=9)return'#8b0000';\n"
+        "  if(c>=6)return'#c0392b';\n"
+        "  if(c>=3)return'#e74c3c';\n"
+        "  if(c>=1)return'#ff6b6b';\n"
+        "  if(c>0) return'#ff9999';\n"
+        "  if(c===0)return'#2d3436';\n"
+        "  if(c>-1)return'#aaffaa';\n"
+        "  if(c>-3)return'#55efc4';\n"
+        "  if(c>-6)return'#27ae60';\n"
+        "  if(c>-9)return'#1e8449';\n"
+        "  return'#145a32';\n"
+        "}\n"
+        "\n"
+        "// ── Top20 + 其他合併 ────────────────────────────────\n"
+        "function getTop20(items,wk){\n"
+        "  const sorted=[...items].sort((a,b)=>b[wk]-a[wk]);\n"
+        "  const top=sorted.slice(0,20);\n"
+        "  const rest=sorted.slice(20);\n"
+        "  if(rest.length>0){\n"
+        "    const totalW=rest.reduce((s,d)=>s+d[wk],0)||1;\n"
+        "    const avgChg=rest.reduce((s,d)=>s+d.chg*d[wk],0)/totalW;\n"
+        "    top.push({name:'其他',code:'OTHER',price:0,chg:avgChg,\n"
+        "      vol:rest.reduce((s,d)=>s+d.vol,0),\n"
+        "      amt:rest.reduce((s,d)=>s+d.amt,0),isOther:true});\n"
+        "  }\n"
+        "  return top;\n"
+        "}\n"
+        "\n"
+        "// ── Squarify 演算法（防麵條方塊） ───────────────────\n"
+        "function worstAR(row,rowSum,shortSide){\n"
+        "  const rowLen=rowSum/shortSide;\n"
+        "  let worst=0;\n"
+        "  for(const d of row){\n"
+        "    const item=rowSum>0?(d.sw/rowSum)*shortSide:0;\n"
+        "    if(item<=0)continue;\n"
+        "    const ar=Math.max(rowLen/item,item/rowLen);\n"
+        "    if(ar>worst)worst=ar;\n"
+        "  }\n"
+        "  return worst;\n"
+        "}\n"
+        "\n"
+        "function squarify(items,x,y,w,h){\n"
+        "  const nodes=[];\n"
+        "  if(!items.length||w<1||h<1)return nodes;\n"
+        "  let rem=[...items],rx=x,ry=y,rw=w,rh=h;\n"
+        "  while(rem.length>0&&rw>0.5&&rh>0.5){\n"
+        "    const isVert=rw>=rh;\n"
+        "    const shortSide=Math.min(rw,rh);\n"
+        "    let row=[rem[0]],rowSum=rem[0].sw;\n"
+        "    for(let i=1;i<rem.length;i++){\n"
+        "      const d=rem[i];\n"
+        "      const newSum=rowSum+d.sw;\n"
+        "      const curr=worstAR(row,rowSum,shortSide);\n"
+        "      const next=worstAR([...row,d],newSum,shortSide);\n"
+        "      if(next<=curr){row.push(d);rowSum=newSum;}\n"
+        "      else break;\n"
+        "    }\n"
+        "    const rowLen=rowSum/shortSide;\n"
+        "    let off=isVert?ry:rx;\n"
+        "    for(const d of row){\n"
+        "      const frac=d.sw/rowSum;\n"
+        "      const cs=frac*shortSide;\n"
+        "      if(isVert)\n"
+        "        nodes.push(Object.assign({},d,{x:rx,y:off,w:rowLen,h:cs}));\n"
+        "      else\n"
+        "        nodes.push(Object.assign({},d,{x:off,y:ry,w:cs,h:rowLen}));\n"
+        "      off+=cs;\n"
+        "    }\n"
+        "    rem=rem.slice(row.length);\n"
+        "    if(isVert){rx+=rowLen;rw-=rowLen;}\n"
+        "    else{ry+=rowLen;rh-=rowLen;}\n"
+        "  }\n"
+        "  return nodes;\n"
+        "}\n"
+        "\n"
+        "// ── 渲染 ─────────────────────────────────────────────\n"
+        "function render(){\n"
+        "  const ct=document.getElementById('tm');\n"
+        "  const W=ct.offsetWidth||800,H=450;\n"
+        "  const top=getTop20(DATA,MODE);\n"
+        "  const totalW=top.reduce((s,d)=>s+d[MODE],0)||1;\n"
+        "  const scale=(W*H)/totalW;\n"
+        "  const scaled=top.map(d=>Object.assign({},d,{sw:d[MODE]*scale}));\n"
+        "  const cells=squarify(scaled,0,0,W,H);\n"
+        "  ct.innerHTML='';\n"
+        "  cells.forEach(function(c){\n"
+        "    if(c.w<1||c.h<1)return;\n"
+        "    const div=document.createElement('div');\n"
+        "    div.className='c';\n"
+        "    const bg=c.isOther?'#2d3436':getColor(c.chg);\n"
+        "    div.style.left=Math.round(c.x+0.5)+'px';\n"
+        "    div.style.top=Math.round(c.y+0.5)+'px';\n"
+        "    div.style.width=Math.max(Math.round(c.w-1),1)+'px';\n"
+        "    div.style.height=Math.max(Math.round(c.h-1),1)+'px';\n"
+        "    div.style.background=bg;\n"
+        "    const sign=c.chg>=0?'+':'';\n"
+        "    div.title=c.name+' '+c.code+'\\n'+c.price+'元 '+sign+c.chg.toFixed(2)+'%';\n"
+        "    if(c.w>38&&c.h>26){\n"
+        "      let inner='';\n"
+        "      if(c.w>56&&c.h>42)inner+='<div class=\"cn\">'+c.name+'</div>';\n"
+        "      inner+='<div class=\"cp\">'+sign+c.chg.toFixed(1)+'%</div>';\n"
+        "      if(c.h>58&&c.price)inner+='<div class=\"cx\">'+c.price+'元</div>';\n"
+        "      div.innerHTML=inner;\n"
+        "    }\n"
+        "    ct.appendChild(div);\n"
+        "  });\n"
+        "}\n"
+        "\n"
+        "function sw(m){\n"
+        "  MODE=m;\n"
+        "  document.getElementById('b-amt').className='tb'+(m==='amt'?' on':'');\n"
+        "  document.getElementById('b-vol').className='tb'+(m==='vol'?' on':'');\n"
+        "  document.getElementById('hint').textContent=\n"
+        "    m==='amt'?'方塊大小=成交值，\U0001f534漲\U0001f7e2跌':'方塊大小=成交量，\U0001f534漲\U0001f7e2跌';\n"
+        "  render();\n"
+        "}\n"
+        "\n"
+        "render();\n"
+        "window.addEventListener('resize',render);\n"
+    )
+
+    return (
+        "<!DOCTYPE html><html lang=\"zh-TW\"><head>"
+        "<meta charset=\"UTF-8\">"
+        "<meta name=\"viewport\" content=\"width=device-width,initial-scale=1\">"
+        "<style>" + CSS + "</style></head><body>"
+        "<div id=\"hdr\">"
+        "  <div id=\"ti\">\U0001f321\ufe0f " + title_esc + "</div>"
+        "  <button class=\"tb on\" id=\"b-amt\" onclick=\"sw('amt')\">成交值</button>"
+        "  <button class=\"tb\" id=\"b-vol\" onclick=\"sw('vol')\">成交量</button>"
+        "  <span id=\"hint\">方塊大小=成交值，\U0001f534漲\U0001f7e2跌</span>"
+        "</div>"
+        "<div id=\"tm\"></div>"
+        "<div class=\"lg\">"
+        "  <div class=\"lb\"></div>"
+        "  <div class=\"ll\">"
+        "    <span>-10%+</span><span>-5%</span><span>平盤</span>"
+        "    <span>+5%</span><span>+10%+</span>"
+        "  </div>"
+        "</div>"
+        "<script>" + JS + "</script>"
+        "</body></html>"
+    )
+
 
 def tab_scanner():
     st.markdown("### 📡 籌碼掃描 — 產業透視")
@@ -1607,7 +1526,6 @@ def tab_scanner():
         if st.button("🔄 重新整理全市場數據",use_container_width=True,key="scn_refresh"):
             for fn in [fetch_twse_prices_all, fetch_twse_institution_all,
                        fetch_tpex_prices_all,  fetch_tpex_institution_all,
-                       fetch_finmind_institution_all, fetch_finmind_prices_all,
                        fetch_disposed_cached,  fetch_full_delivery_cached,
                        fetch_delisting_cached, fetch_official_sectors]:
                 fn.clear()
@@ -1617,66 +1535,37 @@ def tab_scanner():
         if st.session_state.get("scanner_sector"):
             if st.button("⬅ 返回列表",use_container_width=True,key="scn_back"):
                 st.session_state.scanner_sector=None; st.rerun()
-    qdate = get_inst_date_str()
-    token = st.session_state.get("token","")
-    now_tw = datetime.utcnow()+timedelta(hours=8)
-    time_note = "（昨日盤後）" if now_tw.hour < 17 else "（今日盤後）"
-
-    with st.spinner("📡 取得全市場股價..."):
-        # 先試 TWSE/TPEx OpenAPI（Streamlit Cloud 可能被封）
+    qdate=get_inst_date_str()
+    with st.spinner("📡 取得全市場數據 + 官方產業分類..."):
         twse_p = fetch_twse_prices_all()
         tpex_p = fetch_tpex_prices_all()
         prices = {**twse_p, **tpex_p}
         update_market_names(prices)
-
-        # 若 TWSE 被封（上市股票幾乎取不到），改用 FinMind 全市場價格
-        price_src = "TWSE+TPEx"
-        if len(twse_p) < 100 and token:
-            with st.spinner("⚡ TWSE 被限速，改用 FinMind 全市場股價..."):
-                fm_p = fetch_finmind_prices_all(token)
-            if fm_p:
-                prices = {**fm_p, **tpex_p}  # TPEx 若有就保留
-                update_market_names(prices)
-                price_src = f"FinMind({len(fm_p)})+TPEx({len(tpex_p)})"
-
-    with st.spinner("📡 取得三大法人籌碼..."):
         twse_i = fetch_twse_institution_all(qdate)
         tpex_i = fetch_tpex_institution_all(qdate)
         insts  = {**twse_i, **tpex_i}
-        inst_src = "TWSE+TPEx"
-
-        # TWSE 法人被封時，改用 FinMind 批次法人（最完整）
-        if len(twse_i) < 100 and token:
-            with st.spinner("⚡ TWSE法人被限速，改用 FinMind 補全..."):
-                fm_i = fetch_finmind_institution_all(token, qdate)
-            if fm_i:
-                insts    = {**fm_i, **tpex_i}
-                inst_src = f"FinMind({len(fm_i)})+TPEx({len(tpex_i)})"
-        elif len(twse_i) >= 100:
-            inst_src = f"TWSE({len(twse_i)})+TPEx({len(tpex_i)})"
-
-    with st.spinner("📡 載入風控名單 + 產業分類..."):
         disposed  = fetch_disposed_cached()
         full_del  = fetch_full_delivery_cached()
         delist    = fetch_delisting_cached()
         hard_risk = full_del | delist | st.session_state.gemini_delisting
+        # ── 官方產業分類（24 小時快取，幾乎不消耗時間）────────
+        token = st.session_state.get("token", "")
         sector_mapping = fetch_official_sectors(token)
-
-    gkey = st.session_state.gemini_key
+    gkey=st.session_state.gemini_key
     if gkey:
         with st.spinner("🤖 偵測下市風險股..."):
-            g_del = gemini_fetch_delisting(gkey)
-        if g_del:
-            st.warning(f"🤖 Gemini 偵測 {len(g_del)} 支下市風險股：{', '.join(sorted(g_del)[:8])}")
-        hard_risk = hard_risk | g_del
-
-    inst_note = f"法人：{len(insts)}檔（{inst_src}）" if insts else "法人：未取得（請設定 Token）"
-    sec_note  = f"產業：{len(sector_mapping)}種" if sector_mapping else "產業：載入中"
-    st.caption(f"股價：{len(prices)}檔（{price_src}）| {inst_note} | {sec_note} | {time_note}")
-    if not prices: st.error("⚠️ 無法取得股價數據，請確認 FinMind Token 設定"); return
-    if not token:  st.warning("⚠️ 未設定 FinMind Token，法人資料與股價可能不完整，請到「⚙️ 設定」填入 Token")
+            g_del=gemini_fetch_delisting(gkey)
+        if g_del: st.warning(f"🤖 Gemini 偵測 {len(g_del)} 支下市風險股：{', '.join(sorted(g_del)[:8])}")
+        hard_risk=hard_risk|g_del
+    now_tw=datetime.utcnow()+timedelta(hours=8)
+    inst_date=get_institution_query_date_str() if False else (now_tw.date()-timedelta(days=1) if now_tw.hour<17 else now_tw.date())
+    time_note="（昨日盤後）" if now_tw.hour<17 else "（今日盤後）"
+    inst_note=f"法人：{len(insts)} 檔" if insts else "法人：今日未取得"
+    sec_note = f"產業：{len(sector_mapping)} 種官方分類" if sector_mapping else "產業分類：載入中"
+    st.caption(f"股價：{len(prices)} 檔 | {inst_note} | {sec_note} | {time_note}")
+    if not prices: st.error("⚠️ 無法取得股價數據"); return
     if not sector_mapping:
-        st.warning("⚠️ 無法取得產業分類，稍後再試或確認 Token 設定")
+        st.warning("⚠️ 無法取得產業分類資料，請確認網路或 FinMind Token 設定，稍後再試。")
 
     stats = compute_sector_stats(prices, insts, hard_risk, sector_mapping)
     if not st.session_state.get("scanner_sector"):
@@ -1762,7 +1651,7 @@ def tab_scanner():
                   for s in s_data["stocks"]]
             if rows:
                 rows.sort(key=lambda x:x["漲跌%"],reverse=True)
-                st.dataframe(pd.DataFrame(rows),width='stretch',hide_index=True)
+                st.dataframe(pd.DataFrame(rows),use_container_width=True,hide_index=True)
                 avg_chg2=round(sum(r["漲跌%"] for r in rows)/len(rows),2)
                 up_cnt=sum(1 for r in rows if r["漲跌%"]>0)
                 cc1,cc2,cc3=st.columns(3)
@@ -1773,7 +1662,7 @@ def tab_scanner():
         with tab_heat:
             if s_data["stocks"]:
                 heat_html=build_treemap_html(s_data["stocks"],f"{sec_name} 熱力圖")
-                st.iframe(src=f"data:text/html;charset=utf-8,{requests.utils.quote(heat_html)}", height=560)
+                components.html(heat_html,height=560,scrolling=False)
             else: st.info("此產業今日無數據")
 
 def tab_analysis():
@@ -1884,7 +1773,7 @@ def tab_analysis():
                 if idx is not None: st.session_state.results[idx]=new_r
                 save_results_cache(st.session_state.results); st.success("✅ 已更新"); st.rerun()
             else: st.error(f"❌ {err}")
-    st.iframe(src=f"data:text/html;charset=utf-8,{requests.utils.quote(html)}", height=2700)
+    components.html(html,height=2700,scrolling=True)
 
 def tab_calendar():
     st.markdown("### 📅 財經行事曆")
@@ -1934,7 +1823,7 @@ def tab_calendar():
     co3.metric("🔴 利空",bear_cnt); co4.metric("⚪ 中性",len(events)-bull_cnt-bear_cnt)
     try:
         cal_html=build_calendar_html(events,st.session_state.cal_year,st.session_state.cal_month)
-        st.iframe(src=f"data:text/html;charset=utf-8,{requests.utils.quote(cal_html)}", height=1250)
+        components.html(cal_html,height=1250,scrolling=True)
     except Exception as e:
         st.error(f"月曆渲染失敗：{e}")
         pfx=f"{st.session_state.cal_year}-{st.session_state.cal_month:02d}"
@@ -1952,7 +1841,7 @@ def tab_rank():
                       "目標":f"{r['tp']:,.0f}" if r.get("tp") else "-",
                       "風控":("🚨全額交割" if r.get("is_full_del") else "⚠️下市" if r.get("is_delisting") else "⏱處置" if r.get("is_disposed") else "正常")}
                      for r in results])
-    st.dataframe(df,width='stretch',hide_index=True)
+    st.dataframe(df,use_container_width=True,hide_index=True)
     buy2=[r for r in results if r["fc"]>0 and r["tc"]>0 and not r.get("is_hard_risk",False)]
     if buy2:
         st.markdown("### ✅ 外資+投信同向買超")
