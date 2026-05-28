@@ -813,6 +813,7 @@ def get_rev(sid, token):
             for r in rows if ff(r.get("revenue",0))>0]
     recs.sort(key=lambda x:(x["yr"],x["mo"])); return recs[-13:]
 
+@st.cache_data(ttl=7200)   # 2小時快取，防 Yahoo Finance rate limit
 def get_yahoo_target(sid):
     try:
         import yfinance as yf, pandas as _pd
@@ -834,112 +835,101 @@ def get_yahoo_target(sid):
 
 # ── 評分系統 v2.0 ─────────────────────────────────────────────
 
-@st.cache_data(ttl=14400)
+@st.cache_data(ttl=7200)
 def get_finmind_target(sid: str, token: str):
     """
-    從 FinMind TaiwanStockRecommend 取得法人目標價共識。
-    4 小時快取，避免重複 API 呼叫。
+    嘗試從鉅亨網 JSON API 取得法人目標價（無需 Token）。
+    token 參數保留以維持介面相容性。
     """
-    if not token or not sid:
-        return None
     try:
-        start = (date.today() - timedelta(days=120)).strftime("%Y-%m-%d")
-        r = requests.get(
-            FINMIND_API,
-            params={"dataset": "TaiwanStockRecommend",
-                    "data_id": sid, "start_date": start, "token": token},
-            headers=HDR, timeout=15, verify=False)
-        if r.status_code != 200:
-            return None
-        data = r.json().get("data", [])
-        if not data:
-            return None
-        targets = []
-        for item in data:
-            for key in ("target_price", "TargetPrice", "targetPrice", "target"):
-                val = item.get(key)
-                if val and float(val) > 0:
-                    targets.append(float(val))
-                    break
-        if not targets:
-            return None
-        mean_tp = round(sum(targets) / len(targets), 0)
-        return {
-            "target": mean_tp,
-            "high":   round(max(targets), 0),
-            "low":    round(min(targets), 0),
-            "count":  len(targets),
-            "source": "FinMind法人共識（" + str(len(targets)) + "筆）",
-        }
+        # 鉅亨網提供部分股票的分析師評等與目標價 JSON
+        url = "https://invest.cnyes.com/twstock/TWS/" + sid + "/forecast"
+        r = requests.get(url, headers={**HDR,
+            "Referer": "https://invest.cnyes.com/",
+            "Accept": "application/json, text/plain, */*",
+        }, timeout=10, verify=False)
+        if r.status_code == 200:
+            data = r.json()
+            # 鉅亨格式：data.items[].targetPrice 或 data.priceTarget
+            targets = []
+            items = data.get("data", {}).get("items", []) or data.get("items", [])
+            for item in items:
+                for key in ("targetPrice", "target_price", "priceTarget"):
+                    val = item.get(key)
+                    if val and float(val) > 0:
+                        targets.append({
+                            "target": float(val),
+                            "broker": str(item.get("institutionName", item.get("broker", "法人"))),
+                            "rating": str(item.get("rating", item.get("invest", ""))),
+                            "date":   str(item.get("date", ""))[:7],
+                        })
+                        break
+            if targets:
+                vals = [t["target"] for t in targets]
+                return {
+                    "target":  round(sum(vals)/len(vals), 0),
+                    "high":    round(max(vals), 0),
+                    "low":     round(min(vals), 0),
+                    "count":   len(vals),
+                    "source":  "鉅亨網法人共識（" + str(len(vals)) + "筆）",
+                    "details": targets,
+                }
     except Exception as ex:
-        print("【DEBUG】FinMind目標價失敗 " + sid + ": " + str(ex))
-        return None
+        print("【DEBUG】鉅亨目標價失敗 " + sid + ": " + str(ex))
+    return None
 
 def get_web_target(sid: str):
     """
-    從 Goodinfo / MoneydJ 網頁抓取分析師目標價。
-    不需要 Token，每次即時抓取（已在 analyze 的檔案快取保護）。
+    備援網頁抓取：嘗試 CMoney / MoneydJ 的純 HTML 頁面。
+    Goodinfo 改用 JS 渲染，已不適用 requests，已移除。
     """
-    web_headers = {
+    hdrs = {
         "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
         "Accept-Language": "zh-TW,zh;q=0.9",
-        "Referer": "https://goodinfo.tw/",
     }
-    # ── 嘗試 Goodinfo 券商評等/目標價 ─────────────────────────
+    # ── CMoney 個股分析頁（部分股票有目標價） ─────────────────
     try:
-        url = "https://goodinfo.tw/tw/StockBuySellFromBroker.aspx?STOCK_ID=" + sid
-        r = requests.get(url, headers=web_headers, timeout=10, verify=False)
+        url = "https://www.cmoney.tw/forum/stock/" + sid
+        r = requests.get(url, headers={**hdrs,"Referer":"https://www.cmoney.tw/"},
+                         timeout=8, verify=False)
         if r.status_code == 200:
-            text = r.text
-            # 搜尋目標價數字（通常格式：目標價 XXX 元 或 Target XXX）
-            patterns = [
-                r"目標價[\s:：]*([0-9,]+(?:\.[0-9]+)?)",
-                r"Target[\s:：]*([0-9,]+(?:\.[0-9]+)?)",
-                r"TP[\s:：=]*([0-9,]+(?:\.[0-9]+)?)",
-            ]
             found = []
-            for pat in patterns:
-                for m in re.finditer(pat, text):
-                    val = float(m.group(1).replace(",", ""))
-                    if 10 < val < 100000:
-                        found.append(val)
+            for pat in [
+                r"目標價[^0-9\n]{0,5}([0-9,]+(?:\.[0-9]+)?)",
+                r"TP[\s:=]+([0-9,]+(?:\.[0-9]+)?)",
+                r"target[\s:\-]+([0-9,]+(?:\.[0-9]+)?)",
+            ]:
+                for mo in re.finditer(pat, r.text, re.IGNORECASE):
+                    v = float(mo.group(1).replace(",",""))
+                    if 10 < v < 100000:
+                        found.append(v)
             if found:
-                mean_tp = round(sum(found) / len(found), 0)
-                return {
-                    "target": mean_tp,
-                    "high":   round(max(found), 0),
-                    "low":    round(min(found), 0),
-                    "count":  len(found),
-                    "source": "Goodinfo券商目標價（" + str(len(found)) + "筆）",
-                }
+                return {"target":round(sum(found)/len(found),0),
+                        "high":round(max(found),0), "low":round(min(found),0),
+                        "count":len(found),
+                        "source":"CMoney網頁（"+str(len(found))+"筆）"}
     except Exception:
         pass
-    # ── 嘗試 MoneydJ 股票分析 ──────────────────────────────────
+    # ── MoneydJ 個股頁面 ──────────────────────────────────────
     try:
         url = "https://www.moneydj.com/us/sta/staqad01.djhtm?A=" + sid
-        r = requests.get(url, headers={**web_headers, "Referer": "https://www.moneydj.com/"},
-                         timeout=10, verify=False)
+        r = requests.get(url, headers={**hdrs,"Referer":"https://www.moneydj.com/"},
+                         timeout=8, verify=False)
         if r.status_code == 200:
-            text = r.text
-            patterns = [
-                r"目標價[\s:：]*([0-9,]+(?:\.[0-9]+)?)",
-                r"合理價[\s:：]*([0-9,]+(?:\.[0-9]+)?)",
-            ]
             found = []
-            for pat in patterns:
-                for m in re.finditer(pat, text):
-                    val = float(m.group(1).replace(",", ""))
-                    if 10 < val < 100000:
-                        found.append(val)
+            for pat in [
+                r"目標價[^0-9\n]{0,5}([0-9,]+(?:\.[0-9]+)?)",
+                r"合理價[^0-9\n]{0,5}([0-9,]+(?:\.[0-9]+)?)",
+            ]:
+                for mo in re.finditer(pat, r.text):
+                    v = float(mo.group(1).replace(",",""))
+                    if 10 < v < 100000:
+                        found.append(v)
             if found:
-                mean_tp = round(sum(found) / len(found), 0)
-                return {
-                    "target": mean_tp,
-                    "high":   round(max(found), 0),
-                    "low":    round(min(found), 0),
-                    "count":  len(found),
-                    "source": "MoneydJ目標價（" + str(len(found)) + "筆）",
-                }
+                return {"target":round(sum(found)/len(found),0),
+                        "high":round(max(found),0), "low":round(min(found),0),
+                        "count":len(found),
+                        "source":"MoneydJ網頁（"+str(len(found))+"筆）"}
     except Exception:
         pass
     return None
@@ -1195,11 +1185,12 @@ def analyze(sid, token, disposed, full_delivery, delisting, gemini_del, force=Fa
         if ya:
             tp=ya["target"]; tp_h=ya["high"]; tp_l=ya["low"]; tp_n=ya["count"]; ts=ya["source"]
         else:
-            # ① FinMind 法人共識（需要 Token）
+            # ① 鉅亨網法人共識（主要備援）
             if token:
                 fa = get_finmind_target(sid, token)
                 if fa:
                     tp=fa["target"]; tp_h=fa["high"]; tp_l=fa["low"]; tp_n=fa["count"]; ts=fa["source"]
+                    _tp_details=fa.get("details",[])
             # ② 網頁抓取（Goodinfo / MoneydJ，不需 Token）
             if not tp:
                 wa = get_web_target(sid)
