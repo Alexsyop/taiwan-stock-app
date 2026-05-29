@@ -1315,6 +1315,11 @@ def build_wiwynn(r):
                 f'<span class="rv up" style="font-weight:700">{tp_h:,.0f}元</span></div>') if tp_h else ""
         _tp_lo=(f'<div class="row"><span class="rl">最低目標</span>'
                 f'<span class="rv">{tp_l:,.0f}元</span></div>') if tp_l else ""
+        # 若 tp_h/tp_l 缺失（PE估算或單一目標價），用 tp±10% 撐起條形
+        if tp and (not tp_h or tp_h <= 0):
+            tp_h = round(tp * 1.10, 0)   # +10% 作為估計上緣
+        if tp and (not tp_l or tp_l <= 0):
+            tp_l = round(tp * 0.90, 0)   # -10% 作為估計下緣
         rng_bar=""
         if tp_h and tp_l and tp_h>tp_l:
             rng=tp_h-tp_l; cp3=min(max((p-tp_l)/rng*100,0),100); mp3=min(max((tp-tp_l)/rng*100,0),100)
@@ -1884,7 +1889,7 @@ def tab_scanner():
         with tab_heat:
             if s_data["stocks"]:
                 heat_html=build_treemap_html(s_data["stocks"],f"{sec_name} 熱力圖")
-                components.html(heat_html,height=560,scrolling=False)
+                st.iframe(heat_html,height=560,scrolling=False)
             else: st.info("此產業今日無數據")
 
 def tab_analysis():
@@ -1995,7 +2000,7 @@ def tab_analysis():
                 if idx is not None: st.session_state.results[idx]=new_r
                 save_results_cache(st.session_state.results); st.success("✅ 已更新"); st.rerun()
             else: st.error(f"❌ {err}")
-    components.html(html,height=2700,scrolling=True)
+    st.iframe(html,height=2700,scrolling=True)
 
 def tab_calendar():
     st.markdown("### 📅 財經行事曆")
@@ -2045,7 +2050,7 @@ def tab_calendar():
     co3.metric("🔴 利空",bear_cnt); co4.metric("⚪ 中性",len(events)-bull_cnt-bear_cnt)
     try:
         cal_html=build_calendar_html(events,st.session_state.cal_year,st.session_state.cal_month)
-        components.html(cal_html,height=1250,scrolling=True)
+        st.iframe(cal_html,height=1250,scrolling=True)
     except Exception as e:
         st.error(f"月曆渲染失敗：{e}")
         pfx=f"{st.session_state.cal_year}-{st.session_state.cal_month:02d}"
