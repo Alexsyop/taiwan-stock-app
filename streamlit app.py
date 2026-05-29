@@ -1750,7 +1750,7 @@ def tab_scanner():
     st.markdown("### 📡 籌碼掃描 — 產業透視")
     c_r,c_b=st.columns([3,1])
     with c_r:
-        if st.button("🔄 重新整理全市場數據",use_container_width=True,key="scn_refresh"):
+        if st.button("🔄 重新整理全市場數據",width='stretch',key="scn_refresh"):
             for fn in [fetch_twse_prices_all, fetch_twse_institution_all,
                        fetch_tpex_prices_all,  fetch_tpex_institution_all,
                        fetch_disposed_cached,  fetch_full_delivery_cached,
@@ -1760,7 +1760,7 @@ def tab_scanner():
             st.session_state.scanner_sector=None; st.rerun()
     with c_b:
         if st.session_state.get("scanner_sector"):
-            if st.button("⬅ 返回列表",use_container_width=True,key="scn_back"):
+            if st.button("⬅ 返回列表",width='stretch',key="scn_back"):
                 st.session_state.scanner_sector=None; st.rerun()
     qdate=get_inst_date_str()
     with st.spinner("📡 取得全市場數據 + 官方產業分類..."):
@@ -1861,7 +1861,7 @@ def tab_scanner():
         if not s_data: st.warning(f"找不到 {sec_name} 的數據"); return
         c_b2,c_t2=st.columns([1,5])
         with c_b2:
-            if st.button("⬅ 返回",use_container_width=True,key="scn_back2"):
+            if st.button("⬅ 返回",width='stretch',key="scn_back2"):
                 st.session_state.scanner_sector=None; st.rerun()
         with c_t2:
             chg=s_data["avg_chg"]; chg_c="#e74c3c" if chg>0 else "#27ae60"
@@ -1878,7 +1878,7 @@ def tab_scanner():
                   for s in s_data["stocks"]]
             if rows:
                 rows.sort(key=lambda x:x["漲跌%"],reverse=True)
-                st.dataframe(pd.DataFrame(rows),use_container_width=True,hide_index=True)
+                st.dataframe(pd.DataFrame(rows),width='stretch',hide_index=True)
                 avg_chg2=round(sum(r["漲跌%"] for r in rows)/len(rows),2)
                 up_cnt=sum(1 for r in rows if r["漲跌%"]>0)
                 cc1,cc2,cc3=st.columns(3)
@@ -1889,7 +1889,7 @@ def tab_scanner():
         with tab_heat:
             if s_data["stocks"]:
                 heat_html=build_treemap_html(s_data["stocks"],f"{sec_name} 熱力圖")
-                st.iframe(heat_html,height=560,scrolling=False)
+                st.iframe(heat_html,height=560)
             else: st.info("此產業今日無數據")
 
 def tab_analysis():
@@ -1906,7 +1906,7 @@ def tab_analysis():
     with c_s1:
         query=st.text_input("搜尋",placeholder="輸入股號（如 2330）或中文名稱（如 台積電）",label_visibility="collapsed",key="ana_search")
     with c_s2:
-        st.button("搜尋",use_container_width=True,key="ana_search_btn")
+        st.button("搜尋",width='stretch',key="ana_search_btn")
     if query:
         res_s=search_stocks(query)
         if res_s:
@@ -1915,7 +1915,7 @@ def tab_analysis():
             sel_code,sel_name=res_s[sel_i]
             ca,cb,cc2=st.columns(3)
             with ca:
-                if st.button(f"📊 立即分析 {sel_name}",use_container_width=True,disabled=not token,key="ana_now"):
+                if st.button(f"📊 立即分析 {sel_name}",width='stretch',disabled=not token,key="ana_now"):
                     disposed=fetch_disposed_cached(); full_del=fetch_full_delivery_cached()
                     delisting=fetch_delisting_cached(); gemini_del=st.session_state.gemini_delisting
                     with st.spinner(f"分析 {sel_name}（{sel_code}）..."):
@@ -1928,7 +1928,7 @@ def tab_analysis():
                         st.success(f"✅ {sel_name} 完成！評等 {r2['rating']}（{r2['score']}分）"); st.rerun()
                     else: st.error(f"❌ 失敗：{err}")
             with cb:
-                if st.button("➕ 加入自選清單",use_container_width=True,key="ana_add"):
+                if st.button("➕ 加入自選清單",width='stretch',key="ana_add"):
                     codes=[s.strip() for s in st.session_state.stock_list.split(",") if s.strip()]
                     if sel_code not in codes:
                         codes.insert(0,sel_code); st.session_state.stock_list=",".join(codes)
@@ -1940,7 +1940,7 @@ def tab_analysis():
     sids=[s.strip() for s in st.session_state.stock_list.split(",") if s.strip()]
     st.markdown(f"**自選清單：{len(sids)} 支** — `{', '.join(sids[:5])}{'...' if len(sids)>5 else ''}`")
     c1,c2=st.columns([3,1])
-    with c1: run=st.button("🔄 分析全部自選股",disabled=not token,use_container_width=True,key="ana_run")
+    with c1: run=st.button("🔄 分析全部自選股",disabled=not token,width='stretch',key="ana_run")
     with c2: force=st.checkbox("強制重爬",value=False,key="ana_force")
     if not results:
         cached=load_results_cache()
@@ -1978,7 +1978,7 @@ def tab_analysis():
         col.metric(f"{em} {rt}",cnts.get(rt,0))
     full_html=build_full_html(results)
     st.download_button("📥 下載完整 HTML 報告",full_html,
-                       f"portfolio_{date.today().strftime('%Y%m%d')}.html","text/html",use_container_width=True)
+                       f"portfolio_{date.today().strftime('%Y%m%d')}.html","text/html",width='stretch')
     st.markdown("---")
     sorted_r=sorted(results,key=lambda x:x["score"],reverse=True)
     opts2=[f"{r['rating']} {r['name']}（{r['sid']}） — {r['score']}分 | {r['price']:,.0f}元 {r['chg']:+.1f}%" for r in sorted_r]
@@ -1988,9 +1988,9 @@ def tab_analysis():
     with ca:
         html=build_wiwynn(r_sel)
         st.download_button(f"📄 下載 {r_sel['name']} 報告",html,
-                           f"{r_sel['sid']}_{date.today().strftime('%Y%m%d')}.html","text/html",use_container_width=True)
+                           f"{r_sel['sid']}_{date.today().strftime('%Y%m%d')}.html","text/html",width='stretch')
     with cb:
-        if st.button(f"🔄 重新分析 {r_sel['name']}",use_container_width=True,key="ana_rerun"):
+        if st.button(f"🔄 重新分析 {r_sel['name']}",width='stretch',key="ana_rerun"):
             disposed=fetch_disposed_cached(); full_del=fetch_full_delivery_cached()
             delisting=fetch_delisting_cached(); gemini_del=st.session_state.gemini_delisting
             with st.spinner("重新抓取..."):
@@ -2000,14 +2000,14 @@ def tab_analysis():
                 if idx is not None: st.session_state.results[idx]=new_r
                 save_results_cache(st.session_state.results); st.success("✅ 已更新"); st.rerun()
             else: st.error(f"❌ {err}")
-    st.iframe(html,height=2700,scrolling=True)
+    st.iframe(html,height=2700)
 
 def tab_calendar():
     st.markdown("### 📅 財經行事曆")
     gkey=st.session_state.gemini_key
     c1,c2,c3,c4=st.columns([1,3,3,1])
     with c1:
-        if st.button("◄",use_container_width=True,key="cal_prev"):
+        if st.button("◄",width='stretch',key="cal_prev"):
             if st.session_state.cal_month==1:
                 st.session_state.cal_month=12; st.session_state.cal_year-=1
             else: st.session_state.cal_month-=1
@@ -2020,17 +2020,17 @@ def tab_calendar():
         if gkey: st.success("🤖 Gemini 搜尋已啟用")
         else:    st.warning("設定 Gemini Key 以啟用 AI 搜尋")
     with c4:
-        if st.button("►",use_container_width=True,key="cal_next"):
+        if st.button("►",width='stretch',key="cal_next"):
             if st.session_state.cal_month==12:
                 st.session_state.cal_month=1; st.session_state.cal_year+=1
             else: st.session_state.cal_month+=1
             st.session_state.cal_events=[]; st.session_state.cal_events_ts=None; st.rerun()
     c_r,c_t=st.columns(2)
     with c_r:
-        if st.button("🔄 重新搜尋事件",use_container_width=True,key="cal_refresh"):
+        if st.button("🔄 重新搜尋事件",width='stretch',key="cal_refresh"):
             st.session_state.cal_events=[]; st.session_state.cal_events_ts=None; st.rerun()
     with c_t:
-        if st.button("📅 回到本月",use_container_width=True,key="cal_today"):
+        if st.button("📅 回到本月",width='stretch',key="cal_today"):
             st.session_state.cal_year=date.today().year; st.session_state.cal_month=date.today().month
             st.session_state.cal_events=[]; st.session_state.cal_events_ts=None; st.rerun()
     events=[]
@@ -2050,7 +2050,7 @@ def tab_calendar():
     co3.metric("🔴 利空",bear_cnt); co4.metric("⚪ 中性",len(events)-bull_cnt-bear_cnt)
     try:
         cal_html=build_calendar_html(events,st.session_state.cal_year,st.session_state.cal_month)
-        st.iframe(cal_html,height=1250,scrolling=True)
+        st.iframe(cal_html,height=1250)
     except Exception as e:
         st.error(f"月曆渲染失敗：{e}")
         pfx=f"{st.session_state.cal_year}-{st.session_state.cal_month:02d}"
@@ -2068,7 +2068,7 @@ def tab_rank():
                       "目標":f"{r['tp']:,.0f}" if r.get("tp") else "-",
                       "風控":("🚨全額交割" if r.get("is_full_del") else "⚠️下市" if r.get("is_delisting") else "⏱處置" if r.get("is_disposed") else "正常")}
                      for r in results])
-    st.dataframe(df,use_container_width=True,hide_index=True)
+    st.dataframe(df,width='stretch',hide_index=True)
     buy2=[r for r in results if r["fc"]>0 and r["tc"]>0 and not r.get("is_hard_risk",False)]
     if buy2:
         st.markdown("### ✅ 外資+投信同向買超")
@@ -2093,7 +2093,7 @@ def tab_settings():
         gkey=st.text_input("g",value=st.session_state.gemini_key,type="password",placeholder="貼上 Google Gemini API Key（AIza...）",label_visibility="collapsed")
         st.markdown("**📋 自選股清單**（逗號分隔）")
         sl=st.text_area("s",value=st.session_state.stock_list,height=80,label_visibility="collapsed")
-        ok=st.form_submit_button("💾 儲存設定",use_container_width=True)
+        ok=st.form_submit_button("💾 儲存設定",width='stretch')
     if ok:
         st.session_state.token=token.strip(); st.session_state.gemini_key=gkey.strip()
         st.session_state.stock_list=sl.strip(); st.success("✅ 儲存完成！")
@@ -2116,7 +2116,7 @@ GEMINI_API_KEY = "AIza..."
     """)
     cached=load_results_cache()
     if cached: st.success(f"📦 快取：{len(cached)} 支股票")
-    if st.button("🗑 清除所有快取",use_container_width=True,key="clear_cache"):
+    if st.button("🗑 清除所有快取",width='stretch',key="clear_cache"):
         import shutil
         shutil.rmtree(CACHE_DIR,ignore_errors=True); os.makedirs(CACHE_DIR,exist_ok=True)
         for fn in [fetch_twse_prices_all,fetch_twse_institution_all,
