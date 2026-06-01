@@ -2141,9 +2141,304 @@ GEMINI_API_KEY = "AIza..."
         st.session_state.results=[]; st.session_state.gemini_delisting=set()
         st.session_state.cal_events=[]; st.success("✅ 已清除")
 
+
+# ════════════════════════════════════════════════════════════════
+# 美股分析模組（新增，架構完全不動）
+# ════════════════════════════════════════════════════════════════
+
+US_STOCKS = {
+    "NVDA":"NVIDIA","AAPL":"Apple","MSFT":"Microsoft","GOOGL":"Alphabet",
+    "META":"Meta","AMZN":"Amazon","AMD":"AMD","AVGO":"Broadcom",
+    "QCOM":"Qualcomm","TSM":"台積電ADR","ASML":"ASML","AMAT":"應用材料",
+    "KLAC":"科林研發","LRCX":"泛林集團","MU":"美光","INTC":"Intel",
+    "ARM":"ARM Holdings","MRVL":"邁威爾","ORCL":"甲骨文","CRM":"Salesforce",
+}
+
+@st.cache_data(ttl=1800)
+def fetch_us_stock_data(ticker: str) -> dict:
+    """yfinance 取得美股完整數據（30分鐘快取）"""
+    try:
+        import yfinance as yf
+        tk = yf.Ticker(ticker.upper())
+        info = tk.info or {}
+        price = float(info.get("currentPrice") or info.get("regularMarketPrice") or 0)
+        prev  = float(info.get("previousClose") or price)
+        if price <= 0: return {}
+        chg_pct = round((price - prev) / prev * 100, 2) if prev else 0
+        hist = tk.history(period="1y")
+        if len(hist) < 20: return {}
+        closes = hist["Close"].tolist()
+        def _ma(n): return round(sum(closes[-n:]) / n, 2) if len(closes) >= n else round(price, 2)
+        ma5  = _ma(5);  ma20 = _ma(20); ma60  = _ma(60); ma200 = _ma(200)
+        d5   = round((price - ma5)  / ma5  * 100, 2) if ma5  else 0
+        d200 = round((price - ma200) / ma200 * 100, 2) if ma200 else 0
+        closes5 = closes[-5:]
+        d5_hist = []
+        for i, c in enumerate(closes5):
+            ref = sum(closes[-(5-i)-5:-(5-i) if (5-i)>0 else len(closes)]) / 5 if len(closes) >= (5-i)+5 else ma5
+            d5_hist.append(round((c - ref) / ref * 100, 2) if ref else 0)
+        high52 = round(max(closes[-252:] if len(closes)>=252 else closes), 2)
+        low52  = round(min(closes[-252:] if len(closes)>=252 else closes), 2)
+        pe       = info.get("trailingPE") or info.get("forwardPE") or None
+        rev_yoy  = round((info.get("revenueGrowth") or 0) * 100, 1)
+        eps_gr   = round((info.get("earningsGrowth") or 0) * 100, 1)
+        tp   = float(info.get("targetMeanPrice") or 0) or None
+        tp_h = float(info.get("targetHighPrice")  or 0) or None
+        tp_l = float(info.get("targetLowPrice")   or 0) or None
+        tp_n = int(info.get("numberOfAnalystOpinions") or 0)
+        rec  = info.get("recommendationMean") or 0  # 1=強力買進 5=賣出
+        mkt_cap = info.get("marketCap") or 0
+        sector  = info.get("sector") or ""
+        return dict(
+            ticker=ticker.upper(), name=info.get("shortName") or ticker.upper(),
+            price=round(price,2), prev=round(prev,2), chg_pct=chg_pct,
+            ma5=ma5, ma20=ma20, ma60=ma60, ma200=ma200,
+            d5=d5, d200=d200, d5_hist=d5_hist,
+            high52=high52, low52=low52,
+            pe=round(float(pe),1) if pe else None,
+            rev_yoy=rev_yoy, eps_gr=eps_gr,
+            tp=round(tp,2) if tp else None,
+            tp_h=round(tp_h,2) if tp_h else None,
+            tp_l=round(tp_l,2) if tp_l else None,
+            tp_n=tp_n, rec=rec, mkt_cap=mkt_cap, sector=sector,
+        )
+    except Exception as ex:
+        print(f"【DEBUG】美股數據失敗 {ticker}: {ex}")
+        return {}
+
+def _us_score(d) -> tuple:
+    """簡化美股評分（復用 calc_quant_score 架構）"""
+    p=d["price"]; d5=d["d5"]; d200=d["d200"]
+    ma20=d["ma20"]; ma60=d["ma60"]; tp=d["tp"]; tp_h=d["tp_h"]
+    pe=d["pe"]; rev_yoy=d["rev_yoy"]
+    sc=50
+    # ── 技術面 ──
+    if d5 < -5: sc -= 5
+    elif d5 > 5: sc += 3
+    if p > ma20: sc += 5
+    else: sc -= 5
+    if p > ma60: sc += 5
+    else: sc -= 5
+    # ── 目標價 ──
+    ref = tp_h if (tp_h and tp_h > 0) else tp
+    if ref and p > 0:
+        upside = (ref - p) / p * 100
+        if upside > 20:  sc += 15
+        elif upside > 10: sc += 8
+        elif upside > 0:  sc += 3
+        elif upside < -20: sc -= 20
+        elif upside < -10: sc -= 10
+    # ── 基本面 ──
+    if rev_yoy > 20: sc += 10
+    elif rev_yoy > 10: sc += 5
+    elif rev_yoy < -10: sc -= 10
+    elif rev_yoy < 0:   sc -= 5
+    # ── PE 合理性 ──
+    if pe and pe > 0:
+        if pe < 15: sc += 5
+        elif pe < 30: sc += 2
+        elif pe > 80: sc -= 5
+    sc = max(0, min(100, sc))
+    if sc >= 75: rt, lb = "S", "強力推薦"
+    elif sc >= 60: rt, lb = "A", "偏多操作"
+    elif sc >= 40: rt, lb = "B", "中性觀察"
+    else: rt, lb = "C", "謹慎避開"
+    return sc, rt, lb
+
+def build_us_html(d: dict) -> str:
+    """美股分析 HTML 報告"""
+    if not d: return "<body style='background:#1a2332;color:#e8eaf0;padding:20px'>無數據</body>"
+    sc, rt, lb = _us_score(d)
+    p    = d["price"]; chg  = d["chg_pct"]
+    tp   = d["tp"];    tp_h = d["tp_h"]; tp_l = d["tp_l"]; tp_n = d["tp_n"]
+    ma20 = d["ma20"]; ma60 = d["ma60"]; ma200 = d["ma200"]
+    d5_hist = d.get("d5_hist", [])
+    # 顏色（美股：綠漲紅跌）
+    chg_clr = "#27ae60" if chg >= 0 else "#e74c3c"
+    chg_sym = "+" if chg >= 0 else ""
+    # 評等顏色
+    sc_clr  = {"S":"#4ecca3","A":"#27ae60","B":"#f39c12","C":"#e74c3c"}.get(rt,"#8fa3b8")
+    # 目標價上漲空間
+    ref_tp   = tp_h if (tp_h and tp_h > 0) else (tp or 0)
+    up_mean  = round((tp - p) / p * 100, 1) if tp and p else 0
+    up_high  = round((ref_tp - p) / p * 100, 1) if ref_tp and p else 0
+    up_m_clr = "#27ae60" if up_mean >= 0 else "#e74c3c"
+    up_h_clr = "#27ae60" if up_high >= 0 else "#e74c3c"
+    # 52W 進度條
+    rng = d["high52"] - d["low52"]
+    pct52 = round((p - d["low52"]) / rng * 100) if rng else 50
+    pct52 = max(0, min(100, pct52))
+    # 5日乖離趨勢
+    trend_rows = ""
+    labels = ["T-4","T-3","T-2","T-1","今日"]
+    for i, (lbl, v) in enumerate(zip(labels, d5_hist)):
+        bar_w = min(abs(v) * 8, 120)
+        clr   = "#27ae60" if v >= 0 else "#e74c3c"
+        trend_rows += (f'<div style="display:flex;align-items:center;gap:8px;margin:3px 0">'
+                       f'<span style="width:28px;font-size:10px;color:#8fa3b8">{lbl}</span>'
+                       f'<div style="width:{bar_w:.0f}px;height:6px;background:{clr};border-radius:3px"></div>'
+                       f'<span style="font-size:10px;color:{clr}">{v:+.1f}%</span></div>')
+    # 目標價區間條
+    rng_bar = ""
+    if tp and tp_h and tp_l and tp_h > tp_l:
+        full = tp_h - tp_l or 1
+        cur_pct  = max(0, min(100, round((p - tp_l) / full * 100)))
+        mean_pct = max(0, min(100, round((tp - tp_l) / full * 100)))
+        rng_bar = (
+            f'<div style="margin-top:12px">'
+            f'<p style="font-size:10px;font-weight:600;color:#8fa3b8;margin-bottom:6px">'
+            f'⭐ 分析師目標區間（USD）</p>'
+            f'<div style="position:relative;height:8px;border-radius:4px;'
+            f'background:linear-gradient(90deg,#e74c3c,#f39c12,#27ae60);margin:0 8px">'
+            f'<div style="position:absolute;top:-4px;left:{cur_pct}%;'
+            f'width:3px;height:16px;background:#fff;border-radius:2px"></div>'
+            f'<div style="position:absolute;top:-3px;left:{mean_pct}%;'
+            f'width:2px;height:14px;background:#f39c12;border-radius:2px"></div>'
+            f'</div>'
+            f'<div style="display:flex;justify-content:space-between;'
+            f'font-size:9px;color:#8fa3b8;margin-top:4px">'
+            f'<span>低 ${tp_l:.0f}</span>'
+            f'<span>均 ${tp:.0f} | 現 ${p:.2f}</span>'
+            f'<span>高⭐ ${tp_h:.0f}</span></div></div>'
+        )
+    # 市值格式
+    mc = d["mkt_cap"]
+    if mc >= 1e12:   mc_str = f"${mc/1e12:.2f}T"
+    elif mc >= 1e9:  mc_str = f"${mc/1e9:.1f}B"
+    else:            mc_str = f"${mc/1e6:.0f}M"
+    rec_map = {1:"強力買進",2:"買進",3:"持有",4:"減持",5:"賣出"}
+    rec_txt  = rec_map.get(round(d.get("rec",3)), "持有")
+    return f"""<!DOCTYPE html><html lang="zh-TW"><head><meta charset="UTF-8">
+<style>
+*{{box-sizing:border-box;margin:0;padding:0}}
+body{{background:#1a2332;font-family:'Helvetica Neue',Arial,sans-serif;padding:14px;color:#e8eaf0}}
+.hdr{{display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:14px}}
+.htl{{font-size:22px;font-weight:800;color:#e8eaf0}}.hti{{font-size:13px;color:#8fa3b8;margin-top:2px}}
+.badge{{width:52px;height:52px;border-radius:50%;display:flex;align-items:center;justify-content:center;
+        font-size:22px;font-weight:900;color:#fff;background:{sc_clr};flex-shrink:0}}
+.card{{background:#1e2d3e;border:1px solid #2c3e50;border-radius:10px;padding:13px;margin-bottom:10px}}
+.ct{{font-size:11px;font-weight:700;color:#8fa3b8;margin-bottom:10px;letter-spacing:.5px}}
+.row{{display:flex;justify-content:space-between;align-items:center;padding:5px 0;
+      border-bottom:1px solid #2c3e50}}
+.row:last-child{{border:none}}
+.rl{{font-size:12px;color:#b0bec5}}.rv{{font-size:13px;font-weight:700;color:#e8eaf0}}
+.prices{{display:grid;grid-template-columns:1fr 1fr 1fr 1fr;gap:8px;margin-bottom:10px}}
+.pbox{{background:#1e2d3e;border:1px solid #2c3e50;border-radius:8px;padding:10px;text-align:center}}
+.pl{{font-size:10px;color:#8fa3b8;margin-bottom:4px}}.pv{{font-size:15px;font-weight:800}}
+.up{{color:#27ae60}}.dn{{color:#e74c3c}}.nu{{color:#e8eaf0}}
+</style></head><body>
+<div class="hdr">
+  <div>
+    <div class="htl">{d["ticker"]} &nbsp;<span style="font-size:15px;font-weight:400">{d["name"]}</span></div>
+    <div class="hti">{d.get("sector","")} ｜ 評分{sc}/100 ｜ {lb}</div>
+  </div>
+  <div class="badge">{rt}</div>
+</div>
+<div class="prices">
+  <div class="pbox"><div class="pl">現價</div>
+    <div class="pv nu">${p:.2f}</div></div>
+  <div class="pbox"><div class="pl">漲跌</div>
+    <div class="pv" style="color:{chg_clr}">{chg_sym}{chg:.2f}%</div></div>
+  <div class="pbox"><div class="pl">MA5</div>
+    <div class="pv nu">${d["ma5"]:.2f}</div></div>
+  <div class="pbox"><div class="pl">52W高/低</div>
+    <div class="pv" style="font-size:11px">${d["high52"]:.0f}/${d["low52"]:.0f}</div></div>
+</div>
+<div class="card">
+  <p class="ct">📈 技術面</p>
+  <div class="row"><span class="rl">5日乖離</span>
+    <span class="rv {'up' if d["d5"]>=0 else 'dn'}">{d["d5"]:+.2f}%</span></div>
+  <div class="row"><span class="rl">月線乖離（MA20）</span>
+    <span class="rv {'up' if p>=ma20 else 'dn'}">{round((p-ma20)/ma20*100,1):+.1f}%</span></div>
+  <div class="row"><span class="rl">季線乖離（MA60）</span>
+    <span class="rv {'up' if p>=ma60 else 'dn'}">{round((p-ma60)/ma60*100,1):+.1f}%</span></div>
+  <div class="row"><span class="rl">年線乖離（MA200）</span>
+    <span class="rv {'up' if p>=ma200 else 'dn'}">{round((p-ma200)/ma200*100,1):+.1f}%</span></div>
+  <div class="row"><span class="rl">52W位置</span>
+    <span class="rv nu">{pct52}%</span></div>
+  <div style="margin-top:10px"><p style="font-size:10px;color:#8fa3b8;margin-bottom:6px">5日乖離趨勢</p>
+    {trend_rows}</div>
+</div>
+<div class="card">
+  <p class="ct">💰 分析師目標價（USD）</p>
+  <div class="row"><span class="rl">來源</span>
+    <span style="font-size:10px;color:#8fa3b8">Yahoo Finance（{tp_n}位分析師）</span></div>
+  <div class="row"><span class="rl">分析師均值</span>
+    <span class="rv nu">${tp:.2f}</span></div>
+  <div class="row"><span class="rl">vs 現價（均值）</span>
+    <span class="rv {'up' if up_mean>=0 else 'dn'}">{up_mean:+.1f}%</span></div>
+  <div class="row"><span class="rl">vs 現價（最高⭐）</span>
+    <span class="rv {'up' if up_high>=0 else 'dn'}">{up_high:+.1f}%</span></div>
+  <div class="row"><span class="rl">評等共識</span>
+    <span class="rv nu">{rec_txt}</span></div>
+  {rng_bar}
+</div>
+<div class="card">
+  <p class="ct">📊 基本面</p>
+  <div class="row"><span class="rl">本益比（PE）</span>
+    <span class="rv nu">{f'{d["pe"]:.1f}x' if d["pe"] else "N/A"}</span></div>
+  <div class="row"><span class="rl">營收年增率</span>
+    <span class="rv {'up' if d['rev_yoy']>=0 else 'dn'}">{d["rev_yoy"]:+.1f}%</span></div>
+  <div class="row"><span class="rl">EPS 成長率</span>
+    <span class="rv {'up' if d['eps_gr']>=0 else 'dn'}">{d["eps_gr"]:+.1f}%</span></div>
+  <div class="row"><span class="rl">市值</span>
+    <span class="rv nu">{mc_str}</span></div>
+</div>
+</body></html>"""
+
+def tab_us_analysis():
+    """美股分析 Tab"""
+    st.markdown("### 🇺🇸 美股分析")
+    gkey = st.session_state.get("gemini_key", "")
+    # ── 股票選擇 ──────────────────────────────────────────────
+    c1, c2 = st.columns([3, 1])
+    with c1:
+        options = [f"{t} {n}" for t, n in US_STOCKS.items()]
+        sel = st.selectbox("選擇美股", options, key="us_sel")
+        ticker = sel.split()[0] if sel else "NVDA"
+    with c2:
+        custom = st.text_input("或輸入代號", placeholder="e.g. TSLA", key="us_custom").upper().strip()
+        if custom:
+            ticker = custom
+    # ── 操作按鈕 ──────────────────────────────────────────────
+    bc1, bc2 = st.columns(2)
+    with bc1:
+        run = st.button(f"📊 分析 {ticker}", width='stretch', key="us_run")
+    with bc2:
+        if st.button("🔄 清除快取", width='stretch', key="us_clear"):
+            fetch_us_stock_data.clear()
+            st.success("✅ 快取已清除")
+    if not run and not st.session_state.get("us_result"):
+        st.info("👆 點擊「分析」按鈕開始分析美股")
+        return
+    if run:
+        with st.spinner(f"📡 抓取 {ticker} 數據..."):
+            d = fetch_us_stock_data(ticker)
+        if not d:
+            st.error(f"❌ 無法取得 {ticker} 數據，請確認代號是否正確")
+            return
+        st.session_state["us_result"] = d
+        st.session_state["us_ticker"] = ticker
+    d = st.session_state.get("us_result", {})
+    if not d:
+        return
+    # ── 顯示報告 ──────────────────────────────────────────────
+    sc, rt, lb = _us_score(d)
+    p   = d["price"]; chg = d["chg_pct"]
+    chg_sym = "+" if chg >= 0 else ""
+    chg_clr = "green" if chg >= 0 else "red"
+    st.markdown(
+        f"**{d['ticker']}** {d['name']}　"
+        f"${p:.2f}　"
+        f"<span style='color:{'green' if chg>=0 else 'red'}'>{chg_sym}{chg:.2f}%</span>　"
+        f"評分 **{sc}/100** ({lb})",
+        unsafe_allow_html=True)
+    html = build_us_html(d)
+    st.iframe(html, height=1050)
+
 def main():
     try:
-        t1,t2,t3,t4,t5=st.tabs(["📡 籌碼掃描","🔍 個股分析","📅 財經行事曆","🏆 排行榜","⚙️ 設定"])
+        t1,t2,t3,t4,t5,t6=st.tabs(["📡 籌碼掃描","🔍 個股分析","📅 財經行事曆","🏆 排行榜","⚙️ 設定","🇺🇸 美股"])
         with t1:
             try: tab_scanner()
             except Exception as e: st.error(f"籌碼掃描錯誤：{e}"); st.exception(e)
@@ -2159,6 +2454,9 @@ def main():
         with t5:
             try: tab_settings()
             except Exception as e: st.error(f"設定錯誤：{e}"); st.exception(e)
+        with t6:
+            try: tab_us_analysis()
+            except Exception as e: st.error(f"美股分析錯誤：{e}"); st.exception(e)
     except Exception as e:
         st.error(f"App 啟動錯誤：{type(e).__name__}: {e}"); st.exception(e)
 
