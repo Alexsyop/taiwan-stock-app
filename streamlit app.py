@@ -414,9 +414,15 @@ def gemini_fetch_events(api_key, year, month):
         next_m = month%12+1; next_y = year+(1 if month==12 else 0)
         prompt = (
             f"你是財經分析師，提供{year}年{month}月（延伸至{next_y}年{next_m}月上旬）重大財經事件。\n"
-            "必須涵蓋：1.美國CPI/非農/Fed FOMC 2.NVIDIA/Apple/Microsoft/Google/Meta/Amazon財報 "
-            "3.台積電法說會(1/4/7/10月) 4.聯發科法說會(2/5/8/11月) 5.台灣央行(3/6/9/12月) "
-            "6.G7/G20/川習會 7.ECB/BOJ利率決策 8.台灣月營收(每月10日)\n"
+            "必須涵蓋（搜尋最新時程）：\n"
+            "1.美國總經：CPI/PPI/非農/Fed FOMC/PCE\n"
+            "2.企業財報：NVIDIA/Apple/Microsoft/Google/Meta/Amazon/Broadcom/AMD/Qualcomm\n"
+            "3.台灣法說會：台積電(1/4/7/10月)/聯發科(2/5/8/11月)/鴻海/日月光/聯電\n"
+            "4.台灣央行(3/6/9/12月)/月營收公布(每月10日)\n"
+            "5.科技大展：NVIDIA GTC/CES/Computex台北/MWC/Hot Chips/ISSCC\n"
+            "6.AI峰會：AI Summit/TSMC技術論壇/Intel Innovation/Arm DevSummit\n"
+            "7.全球事件：G7/G20/中美貿易/ECB/BOJ/半導體出口管制/地緣政治\n"
+            "8.台股：除權息旺季(7-9月)/MSCI成分調整/外資匯回\n"
             "以JSON陣列回傳（不要markdown）："
             "[{\"date\":\"YYYY-MM-DD\",\"title\":\"15字內\",\"detail\":\"60字內\"，"
             "\"category\":\"美國總經/台灣財經/全球事件/企業財報/科技大會\","
@@ -424,7 +430,14 @@ def gemini_fetch_events(api_key, year, month):
             "\"reason\":\"對台股影響35字內\"}]\n"
             f"目標30~50個事件，{year}年{month}月份，只回傳JSON。"
         )
-        response = client.models.generate_content(model=GEMINI_MODEL, contents=prompt)
+        try:
+            from google.genai import types as _gt
+            _cfg = _gt.GenerateContentConfig(
+                tools=[_gt.Tool(google_search=_gt.GoogleSearch())])
+            response = client.models.generate_content(
+                model=GEMINI_MODEL, contents=prompt, config=_cfg)
+        except Exception:
+            response = client.models.generate_content(model=GEMINI_MODEL, contents=prompt)
         text = response.text.strip()
         text = re.sub(r'```json\s*','',text); text = re.sub(r'```\s*','',text)
         events = json.loads(text) if text.startswith('[') else json.loads(re.search(r'\[.*\]',text,re.DOTALL).group(0))
@@ -1180,34 +1193,36 @@ def analyze(sid, token, disposed, full_delivery, delisting, gemini_del, force=Fa
         if len(rev)>=13 and rev[-13]["rev"]>0: rev_yoy=round((rev[-1]["rev"]-rev[-13]["rev"])/rev[-13]["rev"]*100,1)
         if len(rev)>=2 and rev[-2]["rev"]>0:   rev_mom=round((rev[-1]["rev"]-rev[-2]["rev"])/rev[-2]["rev"]*100,1)
         tp=None; ts="未取得"; tp_h=None; tp_l=None; tp_n=0; _tp_details=[]
-        # ── 目標價四段備援：Yahoo → FinMind → 網頁抓取 → Gemini → PE估算 ──
+        # ── 目標價五段備援（新順序）：Yahoo → Gemini → 鉅亨網 → 網頁 → PE守衛 ──
         ya = get_yahoo_target(sid)
         if ya:
             tp=ya["target"]; tp_h=ya["high"]; tp_l=ya["low"]; tp_n=ya["count"]; ts=ya["source"]
         else:
-            # ① 鉅亨網法人共識（主要備援）
-            if token:
+            _gkey = st.session_state.get("gemini_key", "")
+            # ① Gemini 優先（有 Key 且最可靠）
+            if not tp and _gkey:
+                ga = get_gemini_target(sid, nm(sid), p, _gkey)
+                if ga:
+                    tp=ga["target"]; tp_h=ga["high"]; tp_l=ga["low"]; tp_n=ga["count"]; ts=ga["source"]
+                    _tp_details=ga.get("details",[])
+            # ② 鉅亨網法人共識
+            if not tp and token:
                 fa = get_finmind_target(sid, token)
                 if fa:
                     tp=fa["target"]; tp_h=fa["high"]; tp_l=fa["low"]; tp_n=fa["count"]; ts=fa["source"]
                     _tp_details=fa.get("details",[])
-            # ② 網頁抓取（Goodinfo / MoneydJ，不需 Token）
+            # ③ 網頁抓取（CMoney / MoneydJ）
             if not tp:
                 wa = get_web_target(sid)
                 if wa:
                     tp=wa["target"]; tp_h=wa["high"]; tp_l=wa["low"]; tp_n=wa["count"]; ts=wa["source"]
-            # ③ Gemini 搜尋（需要 Gemini Key）
-            if not tp:
-                _gkey = st.session_state.get("gemini_key", "")
-                if _gkey:
-                    time.sleep(0.5)
-                    ga = get_gemini_target(sid, nm(sid), p, _gkey)
-                    if ga:
-                        tp=ga["target"]; tp_h=ga["high"]; tp_l=ga["low"]; tp_n=ga["count"]; ts=ga["source"]
-                        _tp_details=ga.get("details",[])   # 修正：移入 if ga: 區塊內
-            # ④ PE均值×成長估算（最後備援）
+            # ④ PE均值×成長估算（含合理性守衛：避免高PE成長股被嚴重低估）
             if not tp and pea and pe and rev_yoy is not None and pe>0:
-                tp=round(p*(pea/pe)*min(max(1+rev_yoy/100,0.7),1.8),0); ts="PE均值×成長估算"
+                _pe_est = round(p*(pea/pe)*min(max(1+rev_yoy/100,0.7),1.8), 0)
+                if _pe_est >= p * 0.5:                    # 估算值≥現價50%才採用
+                    tp=_pe_est; ts="PE均值×成長估算"
+                else:                                      # 估算偏低 → 提示設定 Gemini Key
+                    ts="目標價未取得（PE估算偏低，建議設定Gemini Key）"
         sc,rt,lb,pos,neg,warn=calc_quant_score(p,d5,d200,fc,tc,pe,pea,rev_yoy,tp,
                                                 tp_h=tp_h,ma20=ma20,ma60=ma60,rev_mom=rev_mom,inst=inst)
         r52=pr[-252:] if len(pr)>=252 else pr
