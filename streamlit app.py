@@ -2155,55 +2155,91 @@ US_STOCKS = {
 }
 
 @st.cache_data(ttl=1800)
+@st.cache_data(ttl=1800)
 def fetch_us_stock_data(ticker: str) -> dict:
-    """yfinance 取得美股完整數據（30分鐘快取）"""
+    """
+    yfinance 取得美股數據（30分鐘快取）。
+    策略：fast_info 取即時價格（最穩），history 計算 MA，info 取基本面。
+    """
     try:
         import yfinance as yf
-        tk = yf.Ticker(ticker.upper())
-        info = tk.info or {}
-        price = float(info.get("currentPrice") or info.get("regularMarketPrice") or 0)
-        prev  = float(info.get("previousClose") or price)
-        if price <= 0: return {}
-        chg_pct = round((price - prev) / prev * 100, 2) if prev else 0
+        sym = ticker.upper().strip()
+        tk  = yf.Ticker(sym)
+
+        # ── 1. 股價：fast_info 最可靠，失敗才用 history ──────
+        price = 0.0; prev = 0.0
+        try:
+            fi    = tk.fast_info
+            price = float(fi.last_price or 0)
+            prev  = float(fi.previous_close or price)
+        except Exception:
+            pass
+        # fast_info 失敗 → 從 history 最後一根收盤取價格
         hist = tk.history(period="1y")
-        if len(hist) < 20: return {}
-        closes = hist["Close"].tolist()
+        if price <= 0 and len(hist) > 0:
+            price = round(float(hist["Close"].iloc[-1]), 2)
+            prev  = round(float(hist["Close"].iloc[-2]), 2) if len(hist) > 1 else price
+        if price <= 0:
+            print(f"【DEBUG】{sym} price=0，放棄")
+            return {}
+        if len(hist) < 20:
+            print(f"【DEBUG】{sym} 歷史不足20筆")
+            return {}
+
+        chg_pct = round((price - prev) / prev * 100, 2) if prev else 0
+        closes  = hist["Close"].tolist()
+
+        # ── 2. MA / 乖離 ──────────────────────────────────────
         def _ma(n): return round(sum(closes[-n:]) / n, 2) if len(closes) >= n else round(price, 2)
-        ma5  = _ma(5);  ma20 = _ma(20); ma60  = _ma(60); ma200 = _ma(200)
-        d5   = round((price - ma5)  / ma5  * 100, 2) if ma5  else 0
+        ma5  = _ma(5); ma20 = _ma(20); ma60 = _ma(60); ma200 = _ma(200)
+        d5   = round((price - ma5)  / ma5   * 100, 2) if ma5  else 0
         d200 = round((price - ma200) / ma200 * 100, 2) if ma200 else 0
-        closes5 = closes[-5:]
         d5_hist = []
-        for i, c in enumerate(closes5):
-            ref = sum(closes[-(5-i)-5:-(5-i) if (5-i)>0 else len(closes)]) / 5 if len(closes) >= (5-i)+5 else ma5
+        for i, c in enumerate(closes[-5:]):
+            ref = _ma(5)  # 用整體 MA5 作近似
             d5_hist.append(round((c - ref) / ref * 100, 2) if ref else 0)
-        high52 = round(max(closes[-252:] if len(closes)>=252 else closes), 2)
-        low52  = round(min(closes[-252:] if len(closes)>=252 else closes), 2)
-        pe       = info.get("trailingPE") or info.get("forwardPE") or None
-        rev_yoy  = round((info.get("revenueGrowth") or 0) * 100, 1)
-        eps_gr   = round((info.get("earningsGrowth") or 0) * 100, 1)
-        tp   = float(info.get("targetMeanPrice") or 0) or None
-        tp_h = float(info.get("targetHighPrice")  or 0) or None
-        tp_l = float(info.get("targetLowPrice")   or 0) or None
-        tp_n = int(info.get("numberOfAnalystOpinions") or 0)
-        rec  = info.get("recommendationMean") or 0  # 1=強力買進 5=賣出
-        mkt_cap = info.get("marketCap") or 0
-        sector  = info.get("sector") or ""
+        high52 = round(max(closes[-252:] if len(closes) >= 252 else closes), 2)
+        low52  = round(min(closes[-252:] if len(closes) >= 252 else closes), 2)
+
+        # ── 3. 基本面（info 可能較慢，個別 try 保護）─────────
+        pe = rev_yoy = eps_gr = mkt_cap = rec = 0
+        tp = tp_h = tp_l = None; tp_n = 0
+        sector = ""; name = sym
+        try:
+            info = tk.info or {}
+            pe      = info.get("trailingPE") or info.get("forwardPE") or None
+            rev_yoy = round((info.get("revenueGrowth") or 0) * 100, 1)
+            eps_gr  = round((info.get("earningsGrowth") or 0) * 100, 1)
+            tp      = float(info.get("targetMeanPrice") or 0) or None
+            tp_h    = float(info.get("targetHighPrice")  or 0) or None
+            tp_l    = float(info.get("targetLowPrice")   or 0) or None
+            tp_n    = int(info.get("numberOfAnalystOpinions") or 0)
+            rec     = info.get("recommendationMean") or 0
+            mkt_cap = info.get("marketCap") or 0
+            sector  = info.get("sector") or ""
+            name    = info.get("shortName") or info.get("longName") or sym
+            # fast_info market_cap 備援
+            if not mkt_cap:
+                try: mkt_cap = tk.fast_info.market_cap or 0
+                except Exception: pass
+        except Exception as ex:
+            print(f"【DEBUG】{sym} info 失敗（價格仍可用）: {ex}")
+
         return dict(
-            ticker=ticker.upper(), name=info.get("shortName") or ticker.upper(),
-            price=round(price,2), prev=round(prev,2), chg_pct=chg_pct,
+            ticker=sym, name=name,
+            price=round(price, 2), prev=round(prev, 2), chg_pct=chg_pct,
             ma5=ma5, ma20=ma20, ma60=ma60, ma200=ma200,
             d5=d5, d200=d200, d5_hist=d5_hist,
             high52=high52, low52=low52,
-            pe=round(float(pe),1) if pe else None,
+            pe=round(float(pe), 1) if pe else None,
             rev_yoy=rev_yoy, eps_gr=eps_gr,
-            tp=round(tp,2) if tp else None,
-            tp_h=round(tp_h,2) if tp_h else None,
-            tp_l=round(tp_l,2) if tp_l else None,
+            tp=round(tp, 2) if tp else None,
+            tp_h=round(tp_h, 2) if tp_h else None,
+            tp_l=round(tp_l, 2) if tp_l else None,
             tp_n=tp_n, rec=rec, mkt_cap=mkt_cap, sector=sector,
         )
     except Exception as ex:
-        print(f"【DEBUG】美股數據失敗 {ticker}: {ex}")
+        print(f"【DEBUG】美股數據完全失敗 {ticker}: {ex}")
         return {}
 
 def _us_score(d) -> tuple:
