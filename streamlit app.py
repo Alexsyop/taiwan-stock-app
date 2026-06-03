@@ -2438,25 +2438,25 @@ def tab_us_analysis():
 
 def main():
     try:
-        t1,t2,t3,t4,t5,t6=st.tabs(["📡 籌碼掃描","🔍 個股分析","📅 財經行事曆","🏆 排行榜","⚙️ 設定","🇺🇸 美股"])
+        t1,t2,t3,t4,t5,t6=st.tabs(["📡 籌碼掃描","🇹🇼 台股","🇺🇸 美股","📅 財經行事曆","🏆 排行榜","⚙️ 設定"])
         with t1:
             try: tab_scanner()
             except Exception as e: st.error(f"籌碼掃描錯誤：{e}"); st.exception(e)
         with t2:
             try: tab_analysis()
-            except Exception as e: st.error(f"個股分析錯誤：{e}"); st.exception(e)
+            except Exception as e: st.error(f"台股分析錯誤：{e}"); st.exception(e)
         with t3:
-            try: tab_calendar()
-            except Exception as e: st.error(f"財經行事曆錯誤：{e}"); st.exception(e)
-        with t4:
-            try: tab_rank()
-            except Exception as e: st.error(f"排行榜錯誤：{e}"); st.exception(e)
-        with t5:
-            try: tab_settings()
-            except Exception as e: st.error(f"設定錯誤：{e}"); st.exception(e)
-        with t6:
             try: tab_us_analysis()
             except Exception as e: st.error(f"美股分析錯誤：{e}"); st.exception(e)
+        with t4:
+            try: tab_calendar()
+            except Exception as e: st.error(f"財經行事曆錯誤：{e}"); st.exception(e)
+        with t5:
+            try: tab_rank()
+            except Exception as e: st.error(f"排行榜錯誤：{e}"); st.exception(e)
+        with t6:
+            try: tab_settings()
+            except Exception as e: st.error(f"設定錯誤：{e}"); st.exception(e)
     except Exception as e:
         st.error(f"App 啟動錯誤：{type(e).__name__}: {e}"); st.exception(e)
 
