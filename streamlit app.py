@@ -2154,151 +2154,56 @@ US_STOCKS = {
     "ARM":"ARM Holdings","MRVL":"邁威爾","ORCL":"甲骨文","CRM":"Salesforce",
 }
 
-def _safe_float(val, default=None):
-    """安全轉 float，處理 None / '--' / 空字串等異常值。"""
-    if val is None or val == "--" or val == "":
-        return default
-    try:
-        result = float(val)
-        return result if result == result else default  # 過濾 NaN
-    except (TypeError, ValueError):
-        return default
-
-def _safe_int(val, default=0):
-    """安全轉 int，處理 None / 字串等異常值。"""
-    v = _safe_float(val, None)
-    return int(v) if v is not None else default
-
-@st.cache_data(ttl=3600)   # 1小時快取，避免 Yahoo Finance rate limit
+@st.cache_data(ttl=1800)
 def fetch_us_stock_data(ticker: str) -> dict:
-    """
-    yfinance 取得美股數據（三層防護）：
-      ① fast_info 取即時股價（最穩定）
-      ② history 收盤價備援（幾乎不失敗）
-      ③ info 基本面獨立 try-except（失敗不影響技術面）
-    回傳 dict 欄位與 build_us_html / _us_score 完全相容。
-    """
+    """yfinance 取得美股完整數據（30分鐘快取）"""
     try:
         import yfinance as yf
-        sym = ticker.upper().strip()
-        tk  = yf.Ticker(sym)
-
-        # ── ① 即時股價：fast_info（不依賴 info 字典） ─────────
-        price = 0.0; prev = 0.0
-        try:
-            fi    = tk.fast_info
-            price = _safe_float(fi.last_price,     0.0)
-            prev  = _safe_float(fi.previous_close, 0.0)
-        except Exception:
-            pass
-
-        # ── ② 歷史 K 線（計算均線，同時備援股價） ────────────
-        hist = None
-        try:
-            hist = tk.history(period="1y")
-        except Exception as ex:
-            print(f"【DEBUG】{sym} history 失敗: {ex}")
-
-        if price <= 0 and hist is not None and len(hist) > 1:
-            price = _safe_float(hist["Close"].iloc[-1], 0.0)
-            prev  = _safe_float(hist["Close"].iloc[-2], 0.0)
-
-        if price <= 0:
-            print(f"【DEBUG】{sym} 無法取得股價")
-            return {}
-        if hist is None or len(hist) < 20:
-            print(f"【DEBUG】{sym} 歷史 K 線不足 20 筆")
-            return {}
-
-        chg_pct = round((price - prev) / prev * 100, 2) if prev else 0.0
-
-        # ── 均線與乖離（每段獨立保護，長度不足安全跳出） ─────
-        closes = []
-        try:
-            closes = [float(c) for c in hist["Close"].tolist()]
-        except Exception:
-            closes = []
-
-        def _ma(n):
-            try:
-                return round(sum(closes[-n:]) / n, 2) if len(closes) >= n else round(price, 2)
-            except Exception:
-                return round(price, 2)
-
-        def _dev(p, m):
-            try:
-                return round((p - m) / m * 100, 2) if m else 0.0
-            except Exception:
-                return 0.0
-
-        ma5  = _ma(5);  ma20 = _ma(20); ma60 = _ma(60); ma200 = _ma(200)
-        d5   = _dev(price, ma5)
-        d200 = _dev(price, ma200)
-
-        # 5日乖離趨勢（近5根收盤 vs 當時 MA5）
+        tk = yf.Ticker(ticker.upper())
+        info = tk.info or {}
+        price = float(info.get("currentPrice") or info.get("regularMarketPrice") or 0)
+        prev  = float(info.get("previousClose") or price)
+        if price <= 0: return {}
+        chg_pct = round((price - prev) / prev * 100, 2) if prev else 0
+        hist = tk.history(period="1y")
+        if len(hist) < 20: return {}
+        closes = hist["Close"].tolist()
+        def _ma(n): return round(sum(closes[-n:]) / n, 2) if len(closes) >= n else round(price, 2)
+        ma5  = _ma(5);  ma20 = _ma(20); ma60  = _ma(60); ma200 = _ma(200)
+        d5   = round((price - ma5)  / ma5  * 100, 2) if ma5  else 0
+        d200 = round((price - ma200) / ma200 * 100, 2) if ma200 else 0
+        closes5 = closes[-5:]
         d5_hist = []
-        try:
-            for i in range(max(0, len(closes) - 5), len(closes)):
-                c   = closes[i]
-                ref = sum(closes[max(0, i-5):i]) / min(5, i) if i > 0 else ma5
-                d5_hist.append(round((c - ref) / ref * 100, 2) if ref else 0.0)
-        except Exception:
-            d5_hist = [0.0] * 5
-
-        # 52 週高低
-        try:
-            window = closes[-252:] if len(closes) >= 252 else closes
-            high52 = round(max(window), 2)
-            low52  = round(min(window), 2)
-        except Exception:
-            high52 = round(price, 2)
-            low52  = round(price, 2)
-
-        # ── ③ 基本面：info 獨立保護（失敗僅基本面空白）───────
-        pe = None; rev_yoy = 0.0; eps_gr = 0.0
-        tp = None; tp_h = None; tp_l = None; tp_n = 0; rec = 0
-        mkt_cap = 0; sector = ""; name = sym
-        try:
-            info = tk.info or {}
-
-            # PE：trailingPE 優先，無獲利才用 forwardPE
-            pe = _safe_float(info.get("trailingPE")) or _safe_float(info.get("forwardPE"))
-
-            rev_yoy = round((_safe_float(info.get("revenueGrowth"),  0.0)) * 100, 1)
-            eps_gr  = round((_safe_float(info.get("earningsGrowth"), 0.0)) * 100, 1)
-
-            tp   = _safe_float(info.get("targetMeanPrice"))
-            tp_h = _safe_float(info.get("targetHighPrice"))
-            tp_l = _safe_float(info.get("targetLowPrice"))
-            tp_n = _safe_int(info.get("numberOfAnalystOpinions"))
-            rec  = _safe_float(info.get("recommendationMean"), 0)
-
-            mkt_cap = _safe_float(info.get("marketCap"), 0)
-            sector  = str(info.get("sector") or "")
-            name    = str(info.get("shortName") or info.get("longName") or sym)
-
-            # market_cap 備援
-            if not mkt_cap:
-                try: mkt_cap = _safe_float(tk.fast_info.market_cap, 0)
-                except Exception: pass
-        except Exception as ex:
-            print(f"【DEBUG】{sym} info 失敗（技術面仍可用）: {ex}")
-
+        for i, c in enumerate(closes5):
+            ref = sum(closes[-(5-i)-5:-(5-i) if (5-i)>0 else len(closes)]) / 5 if len(closes) >= (5-i)+5 else ma5
+            d5_hist.append(round((c - ref) / ref * 100, 2) if ref else 0)
+        high52 = round(max(closes[-252:] if len(closes)>=252 else closes), 2)
+        low52  = round(min(closes[-252:] if len(closes)>=252 else closes), 2)
+        pe       = info.get("trailingPE") or info.get("forwardPE") or None
+        rev_yoy  = round((info.get("revenueGrowth") or 0) * 100, 1)
+        eps_gr   = round((info.get("earningsGrowth") or 0) * 100, 1)
+        tp   = float(info.get("targetMeanPrice") or 0) or None
+        tp_h = float(info.get("targetHighPrice")  or 0) or None
+        tp_l = float(info.get("targetLowPrice")   or 0) or None
+        tp_n = int(info.get("numberOfAnalystOpinions") or 0)
+        rec  = info.get("recommendationMean") or 0  # 1=強力買進 5=賣出
+        mkt_cap = info.get("marketCap") or 0
+        sector  = info.get("sector") or ""
         return dict(
-            ticker=sym, name=name,
-            price=round(price, 2), prev=round(prev, 2), chg_pct=chg_pct,
+            ticker=ticker.upper(), name=info.get("shortName") or ticker.upper(),
+            price=round(price,2), prev=round(prev,2), chg_pct=chg_pct,
             ma5=ma5, ma20=ma20, ma60=ma60, ma200=ma200,
             d5=d5, d200=d200, d5_hist=d5_hist,
             high52=high52, low52=low52,
-            pe=round(pe, 1) if pe else None,
+            pe=round(float(pe),1) if pe else None,
             rev_yoy=rev_yoy, eps_gr=eps_gr,
-            tp=round(tp, 2) if tp else None,
-            tp_h=round(tp_h, 2) if tp_h else None,
-            tp_l=round(tp_l, 2) if tp_l else None,
+            tp=round(tp,2) if tp else None,
+            tp_h=round(tp_h,2) if tp_h else None,
+            tp_l=round(tp_l,2) if tp_l else None,
             tp_n=tp_n, rec=rec, mkt_cap=mkt_cap, sector=sector,
         )
     except Exception as ex:
-        print(f"【DEBUG】美股完全失敗 {ticker}: {ex}")
+        print(f"【DEBUG】美股數據失敗 {ticker}: {ex}")
         return {}
 
 def _us_score(d) -> tuple:
@@ -2459,11 +2364,11 @@ body{{background:#1a2332;font-family:'Helvetica Neue',Arial,sans-serif;padding:1
   <div class="row"><span class="rl">來源</span>
     <span style="font-size:10px;color:#8fa3b8">Yahoo Finance（{tp_n}位分析師）</span></div>
   <div class="row"><span class="rl">分析師均值</span>
-    <span class="rv nu">{f"${tp:.2f}" if tp else "尚無資料"}</span></div>
+    <span class="rv nu">${tp:.2f}</span></div>
   <div class="row"><span class="rl">vs 現價（均值）</span>
-    <span class="rv {'up' if up_mean>=0 else 'dn'}">{f"{up_mean:+.1f}%" if tp else "—"}</span></div>
+    <span class="rv {'up' if up_mean>=0 else 'dn'}">{up_mean:+.1f}%</span></div>
   <div class="row"><span class="rl">vs 現價（最高⭐）</span>
-    <span class="rv {'up' if up_high>=0 else 'dn'}">{f"{up_high:+.1f}%" if ref_tp else "—"}</span></div>
+    <span class="rv {'up' if up_high>=0 else 'dn'}">{up_high:+.1f}%</span></div>
   <div class="row"><span class="rl">評等共識</span>
     <span class="rv nu">{rec_txt}</span></div>
   {rng_bar}
@@ -2490,24 +2395,19 @@ def tab_us_analysis():
     with c1:
         options = [f"{t} {n}" for t, n in US_STOCKS.items()]
         sel = st.selectbox("選擇美股", options, key="us_sel")
-        sel_ticker = sel.split()[0] if sel else "NVDA"
+        ticker = sel.split()[0] if sel else "NVDA"
     with c2:
         custom = st.text_input("或輸入代號", placeholder="e.g. TSLA", key="us_custom").upper().strip()
-    # 自訂代號優先；清空自訂 → 改回選單
-    ticker = custom if custom else sel_ticker
+        if custom:
+            ticker = custom
     # ── 操作按鈕 ──────────────────────────────────────────────
-    bc1, bc2, bc3 = st.columns(3)
+    bc1, bc2 = st.columns(2)
     with bc1:
         run = st.button(f"📊 分析 {ticker}", width='stretch', key="us_run")
     with bc2:
         if st.button("🔄 清除快取", width='stretch', key="us_clear"):
             fetch_us_stock_data.clear()
             st.success("✅ 快取已清除")
-    with bc3:
-        if st.button("🗑 清除結果", width='stretch', key="us_reset"):
-            st.session_state.pop("us_result", None)
-            st.session_state.pop("us_ticker", None)
-            st.rerun()
     if not run and not st.session_state.get("us_result"):
         st.info("👆 點擊「分析」按鈕開始分析美股")
         return
@@ -2538,7 +2438,7 @@ def tab_us_analysis():
 
 def main():
     try:
-        t1,t2,t3,t4,t5,t6=st.tabs(["📡 籌碼掃描","🇹🇼 台股","🇺🇸 美股","📅 財經行事曆","🏆 排行榜","⚙️ 設定"])
+        t1,t2,t3,t4,t5,t6=st.tabs(["📡 籌碼掃描","🔍 個股分析","📅 財經行事曆","🏆 排行榜","⚙️ 設定","🇺🇸 美股"])
         with t1:
             try: tab_scanner()
             except Exception as e: st.error(f"籌碼掃描錯誤：{e}"); st.exception(e)
@@ -2546,17 +2446,17 @@ def main():
             try: tab_analysis()
             except Exception as e: st.error(f"個股分析錯誤：{e}"); st.exception(e)
         with t3:
-            try: tab_us_analysis()
-            except Exception as e: st.error(f"美股分析錯誤：{e}"); st.exception(e)
-        with t4:
             try: tab_calendar()
             except Exception as e: st.error(f"財經行事曆錯誤：{e}"); st.exception(e)
-        with t5:
+        with t4:
             try: tab_rank()
             except Exception as e: st.error(f"排行榜錯誤：{e}"); st.exception(e)
-        with t6:
+        with t5:
             try: tab_settings()
             except Exception as e: st.error(f"設定錯誤：{e}"); st.exception(e)
+        with t6:
+            try: tab_us_analysis()
+            except Exception as e: st.error(f"美股分析錯誤：{e}"); st.exception(e)
     except Exception as e:
         st.error(f"App 啟動錯誤：{type(e).__name__}: {e}"); st.exception(e)
 
