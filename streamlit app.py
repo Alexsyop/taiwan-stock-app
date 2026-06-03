@@ -2364,11 +2364,11 @@ body{{background:#1a2332;font-family:'Helvetica Neue',Arial,sans-serif;padding:1
   <div class="row"><span class="rl">來源</span>
     <span style="font-size:10px;color:#8fa3b8">Yahoo Finance（{tp_n}位分析師）</span></div>
   <div class="row"><span class="rl">分析師均值</span>
-    <span class="rv nu">{f"${tp:.2f}" if tp else "尚無資料"}</span></div>
+    <span class="rv nu">${tp:.2f}</span></div>
   <div class="row"><span class="rl">vs 現價（均值）</span>
-    <span class="rv {'up' if up_mean>=0 else 'dn'}">{f"{up_mean:+.1f}%" if tp else "—"}</span></div>
+    <span class="rv {'up' if up_mean>=0 else 'dn'}">{up_mean:+.1f}%</span></div>
   <div class="row"><span class="rl">vs 現價（最高⭐）</span>
-    <span class="rv {'up' if up_high>=0 else 'dn'}">{f"{up_high:+.1f}%" if ref_tp else "—"}</span></div>
+    <span class="rv {'up' if up_high>=0 else 'dn'}">{up_high:+.1f}%</span></div>
   <div class="row"><span class="rl">評等共識</span>
     <span class="rv nu">{rec_txt}</span></div>
   {rng_bar}
@@ -2395,24 +2395,19 @@ def tab_us_analysis():
     with c1:
         options = [f"{t} {n}" for t, n in US_STOCKS.items()]
         sel = st.selectbox("選擇美股", options, key="us_sel")
-        sel_ticker = sel.split()[0] if sel else "NVDA"
+        ticker = sel.split()[0] if sel else "NVDA"
     with c2:
         custom = st.text_input("或輸入代號", placeholder="e.g. TSLA", key="us_custom").upper().strip()
-    # 自訂代號優先；清空自訂 → 改回選單
-    ticker = custom if custom else sel_ticker
+        if custom:
+            ticker = custom
     # ── 操作按鈕 ──────────────────────────────────────────────
-    bc1, bc2, bc3 = st.columns(3)
+    bc1, bc2 = st.columns(2)
     with bc1:
         run = st.button(f"📊 分析 {ticker}", width='stretch', key="us_run")
     with bc2:
         if st.button("🔄 清除快取", width='stretch', key="us_clear"):
             fetch_us_stock_data.clear()
             st.success("✅ 快取已清除")
-    with bc3:
-        if st.button("🗑 清除結果", width='stretch', key="us_reset"):
-            st.session_state.pop("us_result", None)
-            st.session_state.pop("us_ticker", None)
-            st.rerun()
     if not run and not st.session_state.get("us_result"):
         st.info("👆 點擊「分析」按鈕開始分析美股")
         return
@@ -2443,7 +2438,7 @@ def tab_us_analysis():
 
 def main():
     try:
-        t1,t2,t3,t4,t5,t6=st.tabs(["📡 籌碼掃描","🇹🇼 台股","🇺🇸 美股","📅 財經行事曆","🏆 排行榜","⚙️ 設定"])
+        t1,t2,t3,t4,t5,t6=st.tabs(["📡 籌碼掃描","🔍 個股分析","📅 財經行事曆","🏆 排行榜","⚙️ 設定","🇺🇸 美股"])
         with t1:
             try: tab_scanner()
             except Exception as e: st.error(f"籌碼掃描錯誤：{e}"); st.exception(e)
@@ -2451,17 +2446,17 @@ def main():
             try: tab_analysis()
             except Exception as e: st.error(f"個股分析錯誤：{e}"); st.exception(e)
         with t3:
-            try: tab_us_analysis()
-            except Exception as e: st.error(f"美股分析錯誤：{e}"); st.exception(e)
-        with t4:
             try: tab_calendar()
             except Exception as e: st.error(f"財經行事曆錯誤：{e}"); st.exception(e)
-        with t5:
+        with t4:
             try: tab_rank()
             except Exception as e: st.error(f"排行榜錯誤：{e}"); st.exception(e)
-        with t6:
+        with t5:
             try: tab_settings()
             except Exception as e: st.error(f"設定錯誤：{e}"); st.exception(e)
+        with t6:
+            try: tab_us_analysis()
+            except Exception as e: st.error(f"美股分析錯誤：{e}"); st.exception(e)
     except Exception as e:
         st.error(f"App 啟動錯誤：{type(e).__name__}: {e}"); st.exception(e)
 
