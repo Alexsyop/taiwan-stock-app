@@ -2172,82 +2172,64 @@ def _safe_int(val, default=0):
 
 @st.cache_data(ttl=3600)
 def fetch_us_stock_data(ticker: str) -> dict:
-    """
-    取得美股數據：四層取價防護，完全防呆。
-    ① fast_info.last_price  ② history收盤備援  ③ Yahoo直連API  ④ return {}
-    """
+    """四層取價 + NaN過濾 + 新聞"""
     try:
-        import yfinance as yf
+        import yfinance as yf, math
         sym = ticker.upper().strip()
         tk  = yf.Ticker(sym)
 
-        # ── ① fast_info 取即時價（最快，不依賴 info）─────────
+        # ── 取即時股價 ────────────────────────────────────────
         price = 0.0; prev = 0.0
         try:
             fi    = tk.fast_info
             price = _safe_float(getattr(fi, "last_price",     None), 0.0)
             prev  = _safe_float(getattr(fi, "previous_close", None), 0.0)
-        except Exception:
-            pass
+        except Exception: pass
 
-        # ── ② history（試多個 period，備援取收盤價）─────────
         hist = None
         for period in ("1y", "6mo", "3mo", "1mo"):
             try:
                 h = tk.history(period=period)
-                if h is not None and len(h) >= 5:
-                    hist = h; break
-            except Exception:
-                continue
+                if h is not None and len(h) >= 5: hist = h; break
+            except Exception: continue
 
         if price <= 0 and hist is not None and len(hist) > 1:
             price = _safe_float(hist["Close"].iloc[-1], 0.0)
             prev  = _safe_float(hist["Close"].iloc[-2], 0.0)
 
-        # ── ③ Yahoo Finance 直連 API（yfinance 全失敗備援）───
         if price <= 0:
             try:
                 url = f"https://query1.finance.yahoo.com/v8/finance/chart/{sym}?interval=1d&range=5d"
-                r   = requests.get(url, headers={**HDR,
-                    "User-Agent": "Mozilla/5.0",
-                    "Accept": "application/json",
-                }, timeout=10, verify=False)
+                r   = requests.get(url, headers={**HDR, "User-Agent": "Mozilla/5.0",
+                                   "Accept": "application/json"}, timeout=10, verify=False)
                 if r.status_code == 200:
-                    jd   = r.json()
-                    meta = jd.get("chart",{}).get("result",[{}])[0].get("meta",{})
+                    meta  = r.json().get("chart",{}).get("result",[{}])[0].get("meta",{})
                     price = _safe_float(meta.get("regularMarketPrice"), 0.0)
                     prev  = _safe_float(meta.get("previousClose"), 0.0)
-            except Exception:
-                pass
+            except Exception: pass
 
         if price <= 0:
             print(f"【DEBUG】{sym} 四層取價全失敗")
             return {}
-        if hist is None or len(hist) < 5:
-            # 沒有歷史就用基本股價資訊，MA 全設為 price
-            hist = None
 
         chg_pct = round((price - prev) / prev * 100, 2) if prev else 0.0
 
-        # ── 均線計算（不足筆數安全跳出）──────────────────────
+        # ── 均線（過濾 NaN / 0 確保 math 安全）──────────────
         closes = []
         try:
             if hist is not None:
-                closes = [float(c) for c in hist["Close"].tolist()]
-        except Exception:
-            closes = []
+                closes = [
+                    float(c) for c in hist["Close"].tolist()
+                    if c is not None and not math.isnan(float(c)) and float(c) > 0
+                ]
+        except Exception: closes = []
 
         def _ma(n):
-            try:
-                return round(sum(closes[-n:]) / n, 2) if len(closes) >= n else round(price, 2)
-            except Exception:
-                return round(price, 2)
-
+            try: return round(sum(closes[-n:]) / n, 2) if len(closes) >= n else round(price, 2)
+            except Exception: return round(price, 2)
         def _dev(p, m):
-            try:
-                return round((p - m) / m * 100, 2) if m else 0.0
-            except Exception:
-                return 0.0
+            try: return round((p - m) / m * 100, 2) if m else 0.0
+            except Exception: return 0.0
 
         ma5  = _ma(5); ma20 = _ma(20); ma60 = _ma(60); ma200 = _ma(200)
         d5   = _dev(price, ma5)
@@ -2256,30 +2238,27 @@ def fetch_us_stock_data(ticker: str) -> dict:
         d5_hist = [0.0] * 5
         try:
             if len(closes) >= 5:
-                for i in range(max(0, len(closes) - 5), len(closes)):
+                for idx in range(5):
+                    i   = len(closes) - 5 + idx
                     c   = closes[i]
                     ref = sum(closes[max(0, i-5):i]) / min(5, max(1, i)) if i > 0 else ma5
-                    idx = i - max(0, len(closes) - 5)
-                    if 0 <= idx < 5:
-                        d5_hist[idx] = round((c - ref) / ref * 100, 2) if ref else 0.0
-        except Exception:
-            d5_hist = [0.0] * 5
+                    d5_hist[idx] = round((c - ref) / ref * 100, 2) if ref else 0.0
+        except Exception: d5_hist = [0.0] * 5
 
         try:
-            w      = closes[-252:] if len(closes) >= 252 else closes
+            w = closes[-252:] if len(closes) >= 252 else closes
             high52 = round(max(w), 2) if w else round(price, 2)
             low52  = round(min(w), 2) if w else round(price, 2)
-        except Exception:
-            high52 = low52 = round(price, 2)
+        except Exception: high52 = low52 = round(price, 2)
 
-        # ── 基本面：info 完全獨立，失敗不影響技術面 ──────────
+        # ── 基本面：info 獨立保護 ─────────────────────────────
         pe = None; rev_yoy = 0.0; eps_gr = 0.0
         tp = tp_h = tp_l = None; tp_n = 0; rec = 0
         mkt_cap = 0; sector = ""; name = sym
         try:
             info = tk.info or {}
             pe      = _safe_float(info.get("trailingPE")) or _safe_float(info.get("forwardPE"))
-            rev_yoy = round((_safe_float(info.get("revenueGrowth"),  0.0)) * 100, 1)
+            rev_yoy = round((_safe_float(info.get("revenueGrowth"), 0.0)) * 100, 1)
             eps_gr  = round((_safe_float(info.get("earningsGrowth"), 0.0)) * 100, 1)
             tp      = _safe_float(info.get("targetMeanPrice"))
             tp_h    = _safe_float(info.get("targetHighPrice"))
@@ -2293,7 +2272,27 @@ def fetch_us_stock_data(ticker: str) -> dict:
                 try: mkt_cap = _safe_float(getattr(tk.fast_info, "market_cap", 0), 0)
                 except Exception: pass
         except Exception as ex:
-            print(f"【DEBUG】{sym} info失敗（技術面仍可用）: {ex}")
+            print(f"【DEBUG】{sym} info失敗: {ex}")
+
+        # ── 最新新聞（最多8則）────────────────────────────────
+        news_list = []
+        try:
+            raw_news = tk.news or []
+            for item in raw_news[:8]:
+                title     = str(item.get("title", "")).strip()
+                link      = str(item.get("link", "") or item.get("url", "")).strip()
+                publisher = str(item.get("publisher", "")).strip()
+                ts        = item.get("providerPublishTime") or item.get("pubDate") or 0
+                if title and link:
+                    from datetime import datetime, timezone
+                    try:
+                        dt_str = datetime.fromtimestamp(int(ts), tz=timezone.utc).strftime("%m/%d")
+                    except Exception:
+                        dt_str = ""
+                    news_list.append({"title": title, "link": link,
+                                      "publisher": publisher, "date": dt_str})
+        except Exception as ex:
+            print(f"【DEBUG】{sym} 新聞失敗: {ex}")
 
         return dict(
             ticker=sym, name=name,
@@ -2307,6 +2306,7 @@ def fetch_us_stock_data(ticker: str) -> dict:
             tp_h=round(tp_h, 2) if tp_h else None,
             tp_l=round(tp_l, 2) if tp_l else None,
             tp_n=tp_n, rec=rec, mkt_cap=mkt_cap, sector=sector,
+            news=news_list,
         )
     except Exception as ex:
         print(f"【DEBUG】美股完全失敗 {ticker}: {ex}")
@@ -2414,6 +2414,27 @@ def build_us_html(d: dict) -> str:
     else:            mc_str = f"${mc/1e6:.0f}M"
     rec_map = {1:"強力買進",2:"買進",3:"持有",4:"減持",5:"賣出"}
     rec_txt  = rec_map.get(round(d.get("rec",3)), "持有")
+    news_html = ''
+    news_items = d.get('news', [])
+    if news_items:
+        news_html += '<div class="card">'
+        news_html += '<p class="ct">📰 最新新聞</p>'
+        for n in news_items:
+            t   = n['title'].replace('"', '&quot;').replace('<', '&lt;').replace('>', '&gt;')
+            url = n['link']
+            pub = n.get('publisher', '')
+            dt  = n.get('date', '')
+            news_html += (
+                '<div style="padding:7px 0;border-bottom:1px solid #2c3e50">'
+                f'<a href="{url}" target="_blank" rel="noopener" '
+                'style="color:#4ecca3;font-size:12px;font-weight:600;'
+                'text-decoration:none;line-height:1.4;display:block;'
+                f'margin-bottom:3px">{t}</a>'
+                f'<span style="font-size:10px;color:#8fa3b8">{pub}'
+                f'{" · " + dt if dt else ""}</span>'
+                '</div>'
+            )
+        news_html += '</div>'
     return f"""<!DOCTYPE html><html lang="zh-TW"><head><meta charset="UTF-8">
 <style>
 *{{box-sizing:border-box;margin:0;padding:0}}
@@ -2490,7 +2511,7 @@ body{{background:#1a2332;font-family:'Helvetica Neue',Arial,sans-serif;padding:1
   <div class="row"><span class="rl">市值</span>
     <span class="rv nu">{mc_str}</span></div>
 </div>
-</body></html>"""
+{news_html}</body></html>"""
 
 def tab_us_analysis():
     """美股分析 Tab"""
